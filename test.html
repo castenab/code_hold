@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Org Chart Tool</title>
+
+  <!--
+    SheetJS — a JavaScript library that reads Excel files
+    directly inside the browser. No data leaves the machine.
+    We load it once here and it becomes available to all our code below.
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    /* ─────────────────────────────────────────────────────────
+       BASE RESET
+       Browsers apply their own default spacing and sizing rules.
+       This clears those so we start from a clean slate.
+    ───────────────────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif;
+      background: #F4F5F7;
+      color: #172B4D;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       SCREEN SWITCHING
+       The tool has two screens: upload and mapping.
+       Only one is visible at a time. We control this by
+       adding or removing the "active" class with JavaScript.
+       .screen        = hidden by default
+       .screen.active = visible
+    ───────────────────────────────────────────────────────── */
+    .screen { display: none; min-height: 100vh; }
+    .screen.active { display: flex; flex-direction: column; }
+
+    /* ─────────────────────────────────────────────────────────
+       TOP BAR
+       The persistent header at the top of every screen.
+    ───────────────────────────────────────────────────────── */
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid #E1E4E8;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .topbar-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #172B4D;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       UPLOAD SCREEN STYLES
+    ───────────────────────────────────────────────────────── */
+    .upload-center {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+    }
+    .upload-card {
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid #E1E4E8;
+      padding: 40px;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+    .upload-card-title {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .upload-card-subtitle {
+      font-size: 13px;
+      color: #6B778C;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    /* The dashed rectangle users drag files onto */
+    .upload-zone {
+      border: 2px dashed #C1C7D0;
+      border-radius: 8px;
+      padding: 28px 20px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      margin-bottom: 20px;
+    }
+    /* Visual feedback when a file is being dragged over */
+    .upload-zone:hover,
+    .upload-zone.dragging {
+      border-color: #0052CC;
+      background: #F0F4FF;
+    }
+    .upload-zone-text {
+      font-size: 13px;
+      color: #6B778C;
+      margin-top: 8px;
+    }
+    .upload-zone-text span {
+      color: #0052CC;
+      font-weight: 500;
+    }
+
+    /* The real file input is invisible — we trigger it with JavaScript */
+    #file-input { display: none; }
+
+    /* Small pill labels showing expected sheet names */
+    .sheet-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+    .sheet-tag {
+      font-size: 11px;
+      padding: 3px 10px;
+      background: #F4F5F7;
+      border: 1px solid #DFE1E6;
+      border-radius: 20px;
+      color: #6B778C;
+    }
+
+    /* Red error message shown if the file is invalid */
+    .error-banner {
+      display: none;
+      background: #FFEBE6;
+      border: 1px solid #FF8F73;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #BF2600;
+      margin-top: 12px;
+      text-align: left;
+    }
+
+    .privacy-note {
+      font-size: 11px;
+      color: #97A0AF;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       MAPPING SCREEN STYLES
+    ───────────────────────────────────────────────────────── */
+    .mapping-header {
+      background: #fff;
+      border-bottom: 1px solid #E1E4E8;
+      padding: 16px 24px;
+      flex-shrink: 0;
+    }
+    .mapping-header h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    .mapping-header p  { font-size: 13px; color: #6B778C; }
+
+    /* Scrollable area that holds all four sheet cards */
+    .mapping-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+    }
+
+    /* ── Individual sheet card ───────────────────────────── */
+    .sheet-card {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #E1E4E8;
+      overflow: hidden;
+    }
+
+    /* The top row of a sheet card — click to expand or collapse */
+    .sheet-card-header {
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid #E1E4E8;
+    }
+    .sheet-card-header:hover { background: #FAFBFC; }
+
+    .sheet-name-row { display: flex; align-items: center; gap: 10px; }
+
+    /* Green dot = sheet found, Red dot = sheet missing */
+    .sheet-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sheet-status.found   { background: #36B37E; }
+    .sheet-status.missing { background: #FF5630; }
+
+    .sheet-card-title { font-size: 14px; font-weight: 600; }
+    .sheet-card-sub   { font-size: 12px; color: #6B778C; margin-top: 2px; }
+
+    /* "Sheet found" / "Not found" badge on the right of card header */
+    .sheet-found-badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .sheet-found-badge.found   { background: #E3FCEF; color: #006644; }
+    .sheet-found-badge.missing { background: #FFEBE6; color: #BF2600; }
+
+    /* The collapsible body of a sheet card containing field rows */
+    .sheet-fields { padding: 0 18px 14px; }
+    .sheet-fields.collapsed { display: none; }
+
+    /* ── Field mapping row ───────────────────────────────── */
+    /* Each row = one expected field + its dropdown to select the column */
+    .field-row {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid #F4F5F7;
+    }
+    .field-row:last-of-type { border-bottom: none; }
+
+    .field-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #172B4D;
+    }
+    /* The small grey text under the field label showing the Workday column name */
+    .field-label span {
+      display: block;
+      font-size: 11px;
+      font-weight: 400;
+      color: #97A0AF;
+      margin-top: 2px;
+    }
+
+    /* "optional" tag shown next to fields that aren't required */
+    .optional-tag {
+      font-size: 10px;
+      color: #6B778C;
+      background: #F4F5F7;
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: 6px;
+      font-weight: 400;
+    }
+
+    .field-select {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #DFE1E6;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #172B4D;
+      background: #fff;
+      cursor: pointer;
+    }
+    .field-select:focus {
+      outline: none;
+      border-color: #0052CC;
+      box-shadow: 0 0 0 2px rgba(0, 82, 204, 0.15);
+    }
+    /* Green border = auto-matched successfully */
+    .field-select.auto-matched { border-color: #36B37E; background: #F6FFFA; }
+    /* Orange border = couldn't auto-match, user must select */
+    .field-select.unmatched    { border-color: #FF8F73; }
+
+    /* Note shown at the bottom of R005 about management chain columns */
+    .chain-note {
+      font-size: 12px;
+      color: #6B778C;
+      background: #F8F9FA;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      border-left: 3px solid #DFE1E6;
+      line-height: 1.6;
+    }
+
+    /* ── Confirm button bar ──────────────────────────────── */
+    .confirm-bar {
+      background: #fff;
+      border-top: 1px solid #E1E4E8;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .confirm-hint { font-size: 12px; color: #6B778C; }
+
+    .btn-primary {
+      background: #0052CC;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover    { background: #0065FF; }
+    .btn-primary:disabled { background: #C1C7D0; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: transparent;
+      color: #6B778C;
+      border: 1px solid #DFE1E6;
+      border-radius: 6px;
+      padding: 9px 16px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .btn-secondary:hover { background: #F4F5F7; }
+  </style>
+</head>
+<body>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 1 — UPLOAD
+     The first screen the user sees.
+     Contains the drag-and-drop zone and file browser.
+     HTML elements here are placeholders — JavaScript brings them to life.
+═══════════════════════════════════════════════════════════════ -->
+<div id="screen-upload" class="screen active">
+
+  <div class="topbar">
+    <div class="topbar-title">
+      <!--
+        Inline SVG icon — a small grid of squares representing an org chart.
+        SVG is like a mini drawing language built into HTML.
+        viewBox defines the coordinate system. stroke = line colour/thickness.
+      -->
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3"  y="3"  width="7" height="7"/>
+        <rect x="14" y="3"  width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/>
+        <rect x="3"  y="14" width="7" height="7"/>
+      </svg>
+      Org Chart Tool
+    </div>
+  </div>
+
+  <div class="upload-center">
+    <div class="upload-card">
+
+      <!-- Upload cloud icon -->
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none"
+           stroke="#6B778C" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round"
+           style="margin: 0 auto 16px; display: block;">
+        <polyline points="16 16 12 12 8 16"/>
+        <line x1="12" y1="12" x2="12" y2="21"/>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+      </svg>
+
+      <div class="upload-card-title">Upload your Workday workbook</div>
+      <div class="upload-card-subtitle">
+        Combine all four Workday reports into one Excel workbook,<br>
+        each report on its own worksheet tab.
+      </div>
+
+      <!--
+        DROP ZONE
+        The visible drag-and-drop area.
+        The actual file-reading is done by the hidden #file-input below.
+        JavaScript connects the two.
+      -->
+      <div class="upload-zone" id="drop-zone">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+             stroke="#C1C7D0" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round"
+             style="margin: 0 auto; display: block;">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <div class="upload-zone-text">
+          Drag and drop your .xlsx file here, or
+          <span id="browse-link">browse</span>
+        </div>
+        <div style="font-size: 11px; color: #97A0AF; margin-top: 6px;">
+          .xlsx files only
+        </div>
+      </div>
+
+      <!--
+        HIDDEN FILE INPUT
+        Browsers require a real file input to open the file picker.
+        We hide this visually but trigger it via JavaScript
+        when the user clicks the drop zone or "browse" link.
+      -->
+      <input type="file" id="file-input" accept=".xlsx,.xls" />
+
+      <!-- Expected worksheet names as visual reference tags -->
+      <div class="sheet-list">
+        <span class="sheet-tag">R005 — Employee list</span>
+        <span class="sheet-tag">New hire</span>
+        <span class="sheet-tag">Departures</span>
+        <span class="sheet-tag">Open reqs</span>
+      </div>
+
+      <!-- Error banner — hidden until a problem occurs -->
+      <div class="error-banner" id="upload-error"></div>
+
+      <div class="privacy-note">
+        All data is processed locally in your browser.<br>
+        Nothing is uploaded to any server.
+      </div>
+
+    </div>
+  </div>
+</div><!-- end screen-upload -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 2 — COLUMN MAPPING
+     Shown after a file is uploaded.
+     JavaScript builds the sheet cards and field dropdowns dynamically.
+     This HTML is just the shell — the content is injected by JS.
+═══════════════════════════════════════════════════════════════ -->
+<div id="screen-mapping" class="screen">
+
+  <div class="topbar">
+    <div class="topbar-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3"  y="3"  width="7" height="7"/>
+        <rect x="14" y="3"  width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/>
+        <rect x="3"  y="14" width="7" height="7"/>
+      </svg>
+      Org Chart Tool
+    </div>
+    <!-- Sends user back to Screen 1 and clears all loaded data -->
+    <button class="btn-secondary" onclick="resetToUpload()">
+      ← Upload different file
+    </button>
+  </div>
+
+  <div class="mapping-header">
+    <h2>Confirm column mapping</h2>
+    <p>
+      We've detected your columns automatically.
+      Green fields matched successfully — review and correct any orange fields before continuing.
+    </p>
+  </div>
+
+  <!--
+    MAPPING BODY — empty container.
+    JavaScript will inject a card for each sheet (R005, New Hire, etc.)
+    with a dropdown row for every expected field.
+  -->
+  <div class="mapping-body" id="mapping-body"></div>
+
+  <div class="confirm-bar">
+    <div class="confirm-hint" id="confirm-hint">
+      Review all sheets before continuing
+    </div>
+    <button class="btn-primary" id="confirm-btn" onclick="confirmMapping()">
+      Confirm &amp; build chart →
+    </button>
+  </div>
+
+</div><!-- end screen-mapping -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     All logic lives here, below the HTML.
+     Scripts run after the HTML is fully loaded.
+     Sections are numbered to match the explanation notes.
+═══════════════════════════════════════════════════════════════ -->
+<script>
+
+// ================================================================
+// SECTION 1 — FIELD DEFINITIONS
+//
+// This is the "dictionary" the tool uses to understand your data.
+//
+// For each of the four reports we define:
+//   label       → display name shown to the user
+//   description → subtitle shown on the sheet card
+//   aliases     → possible tab names this report might have in Excel
+//   fields      → the columns we expect to find in this sheet
+//
+// Each field has:
+//   key         → internal name our code uses (never shown to user)
+//   label       → display name in the mapping UI
+//   aliases     → column header variations Workday might produce
+//   optional    → true means the tool works without this column
+// ================================================================
+
+const SHEET_DEFINITIONS = {
+
+  r005: {
+    label: 'R005 — Employee list',
+    description: 'Main employee headcount data from Workday',
+    aliases: ['r005', 'employee list', 'employees', 'r005 report', 'headcount'],
+    fields: [
+      {
+        key: 'firstName',
+        label: 'First name',
+        aliases: ['first name', 'firstname', 'given name', 'first'],
+      },
+      {
+        key: 'lastName',
+        label: 'Last name',
+        aliases: ['last name', 'lastname', 'surname', 'family name', 'last'],
+      },
+      {
+        key: 'employeeId',
+        label: 'Employee ID',
+        aliases: ['employee id', 'emp id', 'worker id', 'employeeid', 'employee #', 'id'],
+      },
+      {
+        key: 'businessTitle',
+        label: 'Business title',
+        aliases: ['business title', 'job title', 'title', 'position title', 'role'],
+      },
+      {
+        key: 'workCountry',
+        label: 'Work location — country',
+        aliases: ['work location - country', 'work location', 'country', 'location - country', 'work country'],
+      },
+      {
+        key: 'onLeave',
+        label: 'On leave as of effective',
+        aliases: ['on leave as of effective', 'on leave', 'leave of absence', 'loa', 'on leave effective'],
+        optional: true,
+      },
+      {
+        key: 'directManager',
+        label: "Worker's manager",
+        aliases: ["worker's manager", 'workers manager', 'direct manager', 'manager name', 'reporting manager', 'manager'],
+      },
+      {
+        key: 'managerL02',
+        label: 'Manager level 02',
+        aliases: ['manager level 02', 'manager level 2', 'manager l02', 'l2 manager', 'skip level manager'],
+      },
+      {
+        key: 'globalGrade',
+        label: 'Global grade',
+        aliases: ['global grade', 'gg level', 'grade', 'seniority level', 'job level', 'level', 'position level'],
+      },
+      {
+        key: 'employmentType',
+        label: 'Employment type',
+        aliases: ['employment type', 'worker type', 'emp type', 'employment category', 'worker category'],
+      },
+      {
+        key: 'comments',
+        label: 'Comments',
+        aliases: ['comments', 'notes', 'comment', 'additional notes', 'annotation'],
+        optional: true,
+      },
+    ],
+  },
+
+  newHire: {
+    label: 'New hire',
+    description: 'Incoming employees not yet in R005',
+    aliases: ['new hire', 'newhire', 'new hires', 'incoming', 'new employees', 'joining', 'starters'],
+    fields: [
+      {
+        key: 'l4',
+        label: 'L4 — management chain level 4',
+        aliases: ['l4', 'management chain - level 04', 'management chain level 04', 'level 04', 'level 4', 'mc level 04', 'mc-l04'],
+      },
+      {
+        key: 'l5',
+        label: 'L5 — management chain level 5',
+        aliases: ['l5', 'management chain - level 05', 'management chain level 05', 'level 05', 'level 5', 'mc level 05', 'mc-l05'],
+      },
+      {
+        key: 'positionLevel',
+        label: 'Position level (grade)',
+        aliases: ['position level', 'gg level', 'grade', 'global grade', 'seniority level', 'level'],
+      },
+      {
+        key: 'jobTitle',
+        label: 'Job title',
+        aliases: ['job title', 'business title', 'title', 'position title', 'role'],
+      },
+      {
+        key: 'resourceName',
+        label: 'Resource name (employee name)',
+        aliases: ['resource name', 'display name', 'full name', 'name', 'employee name', 'worker name'],
+      },
+      {
+        key: 'employeeId',
+        label: 'Employee ID',
+        aliases: ['employee id', 'emp id', 'worker id', 'employeeid'],
+      },
+      {
+        key: 'startDate',
+        label: 'Start date',
+        aliases: ['start date', 'hire date', 'start dt', 'joining date', 'commencement date', 'effective date'],
+      },
+    ],
+  },
+
+  departures: {
+    label: 'Departures',
+    description: 'Employees leaving the organisation',
+    aliases: ['departures', 'departure', 'leavers', 'leaving', 'offboarding', 'terminations', 'exits'],
+    fields: [
+      {
+        key: 'l4',
+        label: 'L4 — management chain level 4',
+        aliases: ['l4', 'management chain - level 04', 'management chain level 04', 'level 04', 'level 4', 'mc level 04', 'mc-l04'],
+      },
+      {
+        key: 'l5',
+        label: 'L5 — management chain level 5',
+        aliases: ['l5', 'management chain - level 05', 'management chain level 05', 'level 05', 'level 5', 'mc level 05', 'mc-l05'],
+      },
+      {
+        key: 'positionLevel',
+        label: 'Position level (grade)',
+        aliases: ['position level', 'gg level', 'grade', 'global grade', 'seniority level', 'level'],
+      },
+      {
+        key: 'jobTitle',
+        label: 'Job title',
+        aliases: ['job title', 'business title', 'title', 'position title', 'role'],
+      },
+      {
+        key: 'resourceName',
+        label: 'Resource name (employee name)',
+        aliases: ['resource name', 'display name', 'full name', 'name', 'employee name', 'worker name'],
+      },
+      {
+        key: 'employeeId',
+        label: 'Employee ID',
+        aliases: ['employee id', 'emp id', 'worker id', 'employeeid'],
+      },
+      {
+        key: 'departureDate',
+        label: 'Departure date',
+        aliases: ['departure date', 'leaving date', 'termination date', 'end date', 'last day', 'last working day'],
+      },
+    ],
+  },
+
+  openReqs: {
+    label: 'Open reqs',
+    description: 'Open job requisitions',
+    aliases: ['open reqs', 'open req', 'open positions', 'requisitions', 'reqs', 'job openings', 'vacancies'],
+    fields: [
+      {
+        key: 'l4',
+        label: 'L4 — management chain level 4',
+        aliases: ['l4', 'management chain - level 04', 'management chain level 04', 'level 04', 'level 4', 'mc level 04', 'mc-l04'],
+      },
+      {
+        key: 'l5',
+        label: 'L5 — management chain level 5',
+        aliases: ['l5', 'management chain - level 05', 'management chain level 05', 'level 05', 'level 5', 'mc level 05', 'mc-l05'],
+      },
+      {
+        key: 'hiringManager',
+        label: 'Hiring manager',
+        aliases: ['hiring manager', 'req manager', 'manager', 'recruiter manager'],
+      },
+      {
+        key: 'positionLevel',
+        label: 'Position level (grade)',
+        aliases: ['position level', 'gg level', 'grade', 'global grade', 'seniority level', 'level'],
+      },
+      {
+        key: 'jobTitle',
+        label: 'Job title',
+        aliases: ['job title', 'business title', 'title', 'position title', 'role title'],
+      },
+      {
+        key: 'currentStatus',
+        label: 'Current status',
+        aliases: ['current status', 'status', 'req status', 'recruitment status'],
+      },
+      {
+        key: 'reasonForVacancy',
+        label: 'Reason for vacancy',
+        aliases: ['reason for vacancy', 'vacancy reason', 'reason', 'open reason'],
+      },
+      {
+        key: 'personReplaced',
+        label: 'Person being replaced',
+        aliases: ['person being replaced', 'replacing', 'backfill for', 'replacement for'],
+        optional: true,
+      },
+      {
+        key: 'location',
+        label: 'Location',
+        aliases: ['location', 'work location', 'city', 'office', 'site'],
+      },
+      {
+        key: 'daysOpen',
+        label: 'Days in open status',
+        aliases: ['days in open status', 'days open', 'days in status', 'open days', 'age'],
+      },
+    ],
+  },
+
+};
+
+
+// ================================================================
+// SECTION 2 — APPLICATION STATE
+//
+// STATE is a single object that holds everything the tool knows
+// at any given moment. Think of it as the tool's memory.
+//
+// workbook   → the raw Excel file parsed by SheetJS
+// sheetMap   → which Excel tab name matched which report key
+//              e.g. { r005: "R005 Employee Data", newHire: "New Hires" }
+// headers    → the actual column headers found in each sheet
+//              e.g. { r005: ["First Name", "Last Name", ...] }
+// columnMap  → the final confirmed mapping of field → column name
+//              e.g. { r005: { firstName: "First Name", ... } }
+// ================================================================
+
+const STATE = {
+  workbook:  null,
+  sheetMap:  {},
+  headers:   {},
+  columnMap: {},
+};
+
+
+// ================================================================
+// SECTION 3 — UTILITY FUNCTIONS
+//
+// Small reusable helpers used throughout the code.
+// ================================================================
+
+/**
+ * normalize()
+ * Makes text comparison forgiving of formatting differences.
+ * "  First Name ", "firstname", and "FIRST NAME" all become "first name".
+ * Trim removes surrounding spaces. toLowerCase removes case differences.
+ */
+function normalize(str) {
+  return (str || '').toString().trim().toLowerCase();
+}
+
+/**
+ * showScreen()
+ * Switches the visible screen by toggling CSS classes.
+ * All screens start hidden (.screen = display:none).
+ * Adding .active makes one visible (.screen.active = display:flex).
+ */
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+/**
+ * showError() / hideError()
+ * Controls the red error banner on the upload screen.
+ */
+function showError(msg) {
+  const el = document.getElementById('upload-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function hideError() {
+  document.getElementById('upload-error').style.display = 'none';
+}
+
+/**
+ * resetToUpload()
+ * Clears all loaded data and returns to Screen 1.
+ * Called when the user clicks "Upload different file".
+ */
+function resetToUpload() {
+  STATE.workbook  = null;
+  STATE.sheetMap  = {};
+  STATE.headers   = {};
+  STATE.columnMap = {};
+  document.getElementById('file-input').value = '';
+  hideError();
+  showScreen('screen-upload');
+}
+
+
+// ================================================================
+// SECTION 4 — FILE UPLOAD HANDLING
+//
+// Wires up three ways to select a file:
+//   1. Dragging a file over the drop zone
+//   2. Dropping a file onto the drop zone
+//   3. Clicking "browse" to open the system file picker
+//
+// All three routes end at processFile().
+// ================================================================
+
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const browseLink = document.getElementById('browse-link');
+
+// Drag over — file is hovering above the zone but not dropped yet
+// preventDefault() stops the browser's default behaviour (opening the file)
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('dragging'); // adds blue border
+});
+
+// Drag leave — file moved away without being dropped
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragging');
+});
+
+// Drop — file released onto the zone
+// e.dataTransfer.files[0] gets the first dropped file
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragging');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+});
+
+// Click on drop zone — opens file picker
+// We check it's not the browse link (which has its own listener)
+dropZone.addEventListener('click', e => {
+  if (e.target !== browseLink) fileInput.click();
+});
+
+// Click on "browse" link — also opens file picker
+browseLink.addEventListener('click', e => {
+  e.stopPropagation(); // prevents the drop zone click from also firing
+  fileInput.click();
+});
+
+// File picker selection — fires when user confirms a file in the picker
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+});
+
+
+// ================================================================
+// SECTION 5 — FILE PROCESSING
+//
+// Called once a file is received (via drop or picker).
+// Steps:
+//   1. Validate it's an Excel file
+//   2. Use FileReader (built into browsers) to read the file as binary
+//   3. Pass the binary data to SheetJS to parse
+//   4. Store the parsed workbook in STATE
+//   5. Move on to sheet detection
+//
+// Why binary? Excel files are compressed binary formats — not plain text.
+// SheetJS knows how to decode them. We just need to read the raw bytes.
+// ================================================================
+
+function processFile(file) {
+  hideError();
+
+  // Guard: reject anything that's not .xlsx or .xls
+  if (!file.name.match(/\.(xlsx|xls)$/i)) {
+    showError('Please upload an Excel file (.xlsx or .xls)');
+    return;
+  }
+
+  /*
+   * FileReader is a browser built-in that reads files from disk.
+   * readAsArrayBuffer() reads the file as raw binary bytes.
+   * When it finishes, the onload event fires with the result.
+   */
+  const reader = new FileReader();
+
+  reader.onload = function(e) {
+    try {
+      /*
+       * SheetJS XLSX.read() takes the binary bytes and turns them
+       * into a JavaScript workbook object we can work with.
+       *
+       * cellDates: true → parse date cells as JavaScript Date objects
+       *                    rather than Excel's internal number format
+       */
+      const data = new Uint8Array(e.target.result);
+      STATE.workbook = XLSX.read(data, { type: 'array', cellDates: true });
+
+      // Success — move to the next step
+      detectSheets();
+
+    } catch (err) {
+      showError('Could not read this file. Make sure it is a valid Excel workbook.');
+      console.error('SheetJS parse error:', err);
+    }
+  };
+
+  reader.readAsArrayBuffer(file);
+}
+
+
+// ================================================================
+// SECTION 6 — SHEET DETECTION
+//
+// The workbook contains multiple tabs (sheets).
+// This function works out which tab is which report.
+//
+// Process:
+//   For each report (r005, newHire, departures, openReqs):
+//     Loop through every tab name in the workbook.
+//     Normalize both the tab name and each alias.
+//     If the tab name contains any alias → it's a match.
+//
+// Example:
+//   Tab name: "R005 Employee Data Q2"
+//   Alias:    "r005"
+//   normalize("R005 Employee Data Q2") = "r005 employee data q2"
+//   Does it include "r005"? Yes → match.
+//
+// Result stored in STATE.sheetMap:
+//   { r005: "R005 Employee Data Q2", newHire: "New Hires", ... }
+// ================================================================
+
+function detectSheets() {
+  STATE.sheetMap = {};
+
+  const tabNames = STATE.workbook.SheetNames; // array of all tab names
+
+  for (const [reportKey, reportDef] of Object.entries(SHEET_DEFINITIONS)) {
+    for (const tabName of tabNames) {
+      const normalTab = normalize(tabName);
+
+      // Test every alias for this report against this tab name
+      const isMatch = reportDef.aliases.some(alias =>
+        normalTab.includes(normalize(alias))
+      );
+
+      // First match wins — store it and stop checking this report
+      if (isMatch && !STATE.sheetMap[reportKey]) {
+        STATE.sheetMap[reportKey] = tabName;
+        break;
+      }
+    }
+  }
+
+  // Once sheets are identified, extract their column headers
+  extractHeaders();
+
+  // Build the mapping UI and show Screen 2
+  buildMappingUI();
+  showScreen('screen-mapping');
+}
+
+
+// ================================================================
+// SECTION 7 — HEADER EXTRACTION
+//
+// For each matched sheet, read the first row of data.
+// In every Workday export, row 1 is the column headers.
+//
+// XLSX.utils.sheet_to_json with { header: 1 } returns an array of arrays:
+//   [ ["First Name", "Last Name", "Employee ID", ...],  ← row 1 (headers)
+//     ["Sarah",      "Chen",      "EMP001", ...],       ← row 2 (first employee)
+//     ... ]
+//
+// We take rows[0] — the first inner array — as our header list.
+// We filter out empty cells (some exports have blank trailing columns).
+//
+// Result stored in STATE.headers:
+//   { r005: ["First Name", "Last Name", "Employee ID", ...], ... }
+// ================================================================
+
+function extractHeaders() {
+  STATE.headers = {};
+
+  for (const [reportKey, tabName] of Object.entries(STATE.sheetMap)) {
+    const worksheet = STATE.workbook.Sheets[tabName];
+
+    // header: 1 means "use row numbers as keys, give me raw arrays"
+    const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+    if (rows.length > 0) {
+      STATE.headers[reportKey] = rows[0]
+        .map(h => (h || '').toString().trim())
+        .filter(h => h.length > 0);
+    }
+  }
+}
+
+
+// ================================================================
+// SECTION 8 — AUTO-MATCH
+//
+// Given a field's aliases and the real column headers from the file,
+// returns the best matching header — or null if nothing matches.
+//
+// Two passes:
+//   Pass 1: Exact match (after normalization)
+//           "first name" === "first name" → match
+//   Pass 2: Contains match
+//           "employee first name" includes "first name" → match
+//           Catches headers with extra surrounding words
+//
+// Returns the original (non-normalized) header string so we can
+// use it to reference the actual column later.
+// ================================================================
+
+function autoMatch(aliases, actualHeaders) {
+  // Pass 1 — exact match
+  for (const alias of aliases) {
+    const normAlias = normalize(alias);
+    for (const header of actualHeaders) {
+      if (normalize(header) === normAlias) return header;
+    }
+  }
+  // Pass 2 — partial / contains match
+  for (const alias of aliases) {
+    const normAlias = normalize(alias);
+    for (const header of actualHeaders) {
+      const normHeader = normalize(header);
+      if (normHeader.includes(normAlias) || normAlias.includes(normHeader)) {
+        return header;
+      }
+    }
+  }
+  return null; // no match found
+}
+
+
+// ================================================================
+// SECTION 9 — MANAGEMENT CHAIN COLUMN DETECTION
+//
+// R005 contains up to 10 management chain columns:
+//   "Management Chain - Level 01", "Management Chain - Level 02", ... "Level 10"
+//
+// Rather than listing all 10 as fixed aliases, we auto-detect them
+// by scanning all headers for the text "management chain".
+//
+// These columns are used in Section 2 to build the org hierarchy.
+// They aren't shown as individual field rows — instead we show a
+// summary note listing all the columns we found.
+// ================================================================
+
+function detectManagementChainColumns(headers) {
+  return headers.filter(h => normalize(h).includes('management chain'));
+}
+
+
+// ================================================================
+// SECTION 10 — MAPPING UI BUILDER
+//
+// Builds the visual column mapping screen.
+// Called after sheet detection and header extraction.
+//
+// For each of the four reports:
+//   1. Creates a sheet card (collapsible container)
+//   2. Shows whether the sheet was found in the workbook
+//   3. For each expected field: renders a label + dropdown
+//   4. Pre-selects the dropdown if auto-match found a column
+//   5. Marks the dropdown green (matched) or orange (unmatched)
+//
+// All HTML for the mapping screen is generated dynamically here
+// using JavaScript's createElement and innerHTML.
+// ================================================================
+
+function buildMappingUI() {
+  const container = document.getElementById('mapping-body');
+  container.innerHTML = ''; // clear any previous content
+
+  for (const [reportKey, reportDef] of Object.entries(SHEET_DEFINITIONS)) {
+
+    const isFound  = !!STATE.sheetMap[reportKey];         // was this sheet detected?
+    const tabName  = STATE.sheetMap[reportKey] || null;   // actual tab name in Excel
+    const headers  = isFound ? (STATE.headers[reportKey] || []) : [];
+
+    // ── Create the card container ──────────────────────────
+    const card = document.createElement('div');
+    card.className = 'sheet-card';
+
+    // ── Card header (click to expand/collapse) ─────────────
+    const cardHeader = document.createElement('div');
+    cardHeader.className = 'sheet-card-header';
+    cardHeader.innerHTML = `
+      <div class="sheet-name-row">
+        <div class="sheet-status ${isFound ? 'found' : 'missing'}"></div>
+        <div>
+          <div class="sheet-card-title">${reportDef.label}</div>
+          <div class="sheet-card-sub">
+            ${isFound
+              ? `Matched to tab: <strong>"${tabName}"</strong>`
+              : reportDef.description}
+          </div>
+        </div>
+      </div>
+      <span class="sheet-found-badge ${isFound ? 'found' : 'missing'}">
+        ${isFound ? '✓ Sheet found' : '✗ Not found'}
+      </span>
+    `;
+
+    // ── Field list (the collapsible body) ──────────────────
+    const fieldList = document.createElement('div');
+    fieldList.className = 'sheet-fields';
+    fieldList.id = `fields-${reportKey}`;
+
+    if (!isFound) {
+      // Sheet wasn't detected — show a help message
+      fieldList.innerHTML = `
+        <div style="padding: 14px 0; font-size: 13px; color: #6B778C; line-height: 1.7;">
+          This worksheet was not detected in your workbook.<br>
+          Make sure the tab name contains one of these words:
+          <strong>${reportDef.aliases.slice(0, 4).join(', ')}</strong>
+        </div>
+      `;
+    } else {
+      // Sheet found — build a dropdown row for each expected field
+      for (const field of reportDef.fields) {
+        const matched = autoMatch(field.aliases, headers);
+
+        const row = document.createElement('div');
+        row.className = 'field-row';
+
+        /*
+         * Build the <option> list for the dropdown.
+         * Starts with a blank "— select —" option.
+         * Then adds every column header found in the sheet.
+         * If auto-match found a header, it's pre-selected.
+         */
+        const options = ['', ...headers]
+          .map(h => `
+            <option value="${h}" ${h === matched ? 'selected' : ''}>
+              ${h || '— select column —'}
+            </option>
+          `)
+          .join('');
+
+        row.innerHTML = `
+          <div class="field-label">
+            ${field.label}
+            ${field.optional ? '<span class="optional-tag">optional</span>' : ''}
+            <span>Workday column: ${field.aliases[0]}</span>
+          </div>
+          <select
+            class="field-select ${matched ? 'auto-matched' : (field.optional ? '' : 'unmatched')}"
+            data-report="${reportKey}"
+            data-field="${field.key}"
+            onchange="onSelectChange(this)"
+          >
+            ${options}
+          </select>
+        `;
+
+        fieldList.appendChild(row);
+      }
+
+      // ── Management chain summary note (R005 only) ────────
+      if (reportKey === 'r005') {
+        const chainCols = detectManagementChainColumns(headers);
+        const chainDiv  = document.createElement('div');
+        chainDiv.className = 'chain-note';
+        chainDiv.innerHTML = chainCols.length > 0
+          ? `<strong>Management Chain columns detected (${chainCols.length}):</strong><br>${chainCols.join(' · ')}`
+          : `<strong style="color:#BF2600">No Management Chain columns found.</strong>
+             Make sure your R005 includes columns named
+             "Management Chain - Level 01" through "Level 10".`;
+        fieldList.appendChild(chainDiv);
+      }
+    }
+
+    // ── Toggle expand/collapse on header click ─────────────
+    cardHeader.addEventListener('click', () => {
+      fieldList.classList.toggle('collapsed');
+    });
+
+    card.appendChild(cardHeader);
+    card.appendChild(fieldList);
+    container.appendChild(card);
+  }
+}
+
+/**
+ * onSelectChange()
+ * Called whenever a dropdown value changes.
+ * Updates the green/orange border colour to reflect
+ * whether the field is now mapped or still empty.
+ */
+function onSelectChange(select) {
+  select.classList.remove('auto-matched', 'unmatched');
+  select.classList.add(select.value ? 'auto-matched' : 'unmatched');
+}
+
+
+// ================================================================
+// SECTION 11 — CONFIRM MAPPING
+//
+// Called when the user clicks "Confirm & build chart".
+//
+// Steps:
+//   1. Read every dropdown value from the screen
+//   2. Check that all required fields have been mapped
+//   3. If errors exist: show them and stop
+//   4. If valid: store the final mapping in STATE.columnMap
+//   5. Also detect and store the management chain column names
+//   6. Hand off to Section 2 (the hierarchy builder)
+//
+// After this function, STATE.columnMap will look like:
+//   {
+//     r005: {
+//       firstName: "First Name",
+//       lastName:  "Last Name",
+//       employeeId: "Employee ID",
+//       managementChainCols: ["Management Chain - Level 01", ..., "Level 10"],
+//       ...
+//     },
+//     newHire: { l4: "L4", l5: "L5", startDate: "Start Date", ... },
+//     ...
+//   }
+// ================================================================
+
+function confirmMapping() {
+  const errors = [];
+  STATE.columnMap = {};
+
+  // Step 1 — collect every dropdown value into STATE.columnMap
+  document.querySelectorAll('.field-select').forEach(select => {
+    const reportKey = select.dataset.report;
+    const fieldKey  = select.dataset.field;
+
+    if (!STATE.columnMap[reportKey]) STATE.columnMap[reportKey] = {};
+    STATE.columnMap[reportKey][fieldKey] = select.value || null;
+  });
+
+  // Step 2 — validate required fields in sheets that were found
+  for (const [reportKey, reportDef] of Object.entries(SHEET_DEFINITIONS)) {
+    if (!STATE.sheetMap[reportKey]) continue; // skip missing sheets
+
+    for (const field of reportDef.fields) {
+      if (!field.optional && !STATE.columnMap[reportKey]?.[field.key]) {
+        errors.push(`${reportDef.label}: "${field.label}" must be mapped`);
+      }
+    }
+  }
+
+  // Step 3 — show errors if any required fields are missing
+  if (errors.length > 0) {
+    const hint = document.getElementById('confirm-hint');
+    hint.textContent = `${errors.length} required field${errors.length > 1 ? 's' : ''} not mapped — please review`;
+    hint.style.color = '#BF2600';
+    return;
+  }
+
+  // Step 4 — store management chain column names for the hierarchy builder
+  if (STATE.headers.r005) {
+    STATE.columnMap.r005.managementChainCols =
+      detectManagementChainColumns(STATE.headers.r005);
+  }
+
+  // ── Section 1 complete ──────────────────────────────────
+  // Open browser DevTools (F12 → Console) to inspect the output.
+  console.log('✅ Section 1 complete');
+  console.log('📋 Sheet map (tab name matched to each report):', STATE.sheetMap);
+  console.log('🗺️  Column map (field → column name):', STATE.columnMap);
+  console.log('📊 Raw headers per sheet:', STATE.headers);
+
+  // ── Placeholder for Section 2 ───────────────────────────
+  // This alert will be replaced by the hierarchy builder in Section 2.
+  alert(
+    'Section 1 complete!\n\n' +
+    'The column mapping has been saved.\n\n' +
+    'Open the browser console (F12 → Console tab) to inspect\n' +
+    'the full mapping before Section 2 is added.'
+  );
+}
+
+</script>
+</body>
+</html>
