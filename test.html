@@ -761,7 +761,7 @@ const STATE = {
   // Section 2 — hierarchy data
   employeeMap:     {},   // all employees keyed by Employee ID
   nameMap:         {},   // employee lookup keyed by normalised full name
-  tree:            null, // root node of the resolved org tree
+  roots:           [],   // array of root nodes (SVP-level, from MC Level 03)
   orphans:         [],   // employees whose manager could not be resolved
   rawData: {
     newHires:    [],     // parsed rows from New Hire sheet
@@ -1704,18 +1704,34 @@ function enrichDepartures(employeeMap, nameMap, departureRows) {
 }
 
 
+
+
 // ================================================================
-// SECTION 18 — ROOT NODE DETECTION
+// SECTION 18 — ROOT NODE DETECTION + ORPHAN IDENTIFICATION
 //
-// Scans MC Level 03 and Level 04 across all employee rows.
-// Collects every unique name at those levels.
-// Creates synthetic nodes for any SVP or VP who doesn't
-// have their own R005 row, so the tree has something to attach to.
-// Synthetic L04 nodes are immediately linked to their L03 parent
-// since they have no Worker's Manager field to resolve from.
-// Real L04 nodes (with R005 rows) are linked later by
-// resolveManagerships() which finds the synthetic L03 node
-// via the nameMap.
+// Replaces the old single-root assembleTree() approach.
+//
+// detectAndCreateRootNodes():
+//   Scans MC Level 03 and Level 04 across all employee rows.
+//   Collects every unique name at those levels.
+//   Creates synthetic nodes for any SVP or VP who doesn't
+//   have their own R005 row, so the tree has something to attach to.
+//   Synthetic L04 nodes are immediately linked to their L03 parent
+//   since they have no Worker's Manager field to resolve from.
+//   Real L04 nodes (with R005 rows) are linked later by
+//   resolveManagerships() which finds the L03 node via nameMap.
+//
+//   IMPORTANT: Must run BEFORE resolveManagerships() so synthetic
+//   nodes exist in nameMap when manager lookups happen.
+//
+// createSyntheticNode():
+//   Builds a placeholder node for an SVP or VP who appears
+//   in MC columns but has no R005 row of their own.
+//
+// findRoots():
+//   After all resolution is complete, collects every node
+//   with no parent and at least one child — these are the roots.
+//   Nodes with no parent and no children are orphans.
 // ================================================================
 
 function detectAndCreateRootNodes(employeeMap, nameMap) {
@@ -1723,7 +1739,7 @@ function detectAndCreateRootNodes(employeeMap, nameMap) {
   const level03Names = {}; // name → count
   const level04ToL03 = {}; // l04 name → l03 name
 
-  // Scan every employee's MC Level 03 and Level 04 values
+  // Scan every employee row's MC Level 03 and Level 04 values
   for (const emp of Object.values(employeeMap)) {
     if (emp.isSynthetic) continue;
 
@@ -1759,8 +1775,8 @@ function detectAndCreateRootNodes(employeeMap, nameMap) {
       employeeMap[id] = createSyntheticNode(id, l04Name, 4);
       nameMap[normL04] = id;
 
-      // Link synthetic L04 → L03 parent now
-      // (real L04 nodes are linked by resolveManagerships)
+      // Link synthetic L04 → L03 parent immediately
+      // Real L04 nodes are linked by resolveManagerships()
       const l03Id = nameMap[normalize(l03Name)];
       if (l03Id && employeeMap[l03Id]) {
         employeeMap[id].parentId = l03Id;
@@ -1772,11 +1788,6 @@ function detectAndCreateRootNodes(employeeMap, nameMap) {
   }
 }
 
-/**
- * createSyntheticNode()
- * Builds a placeholder node for an SVP or VP who appears
- * in MC columns but has no R005 row of their own.
- */
 function createSyntheticNode(id, name, managementLevel) {
   return {
     id,
@@ -1805,14 +1816,6 @@ function createSyntheticNode(id, name, managementLevel) {
   };
 }
 
-/**
- * findRoots()
- * After all resolution is complete, collects every node
- * that has no parent but has children.
- * These are the L03 SVP-level roots.
- * Nodes with no parent AND no children are orphans —
- * flagged as data quality issues.
- */
 function findRoots(employeeMap) {
   const roots   = [];
   const orphans = [];
@@ -1829,6 +1832,23 @@ function findRoots(employeeMap) {
   return { roots, orphans };
 }
 
+/**
+ * countDescendants()
+ * Recursively counts all nodes below a given employee.
+ * Kept for use in console verification and future summary table.
+ */
+function countDescendants(employeeMap, empId) {
+  const emp = employeeMap[empId];
+  if (!emp || emp.children.length === 0) return 0;
+  let total = emp.children.length;
+  for (const childId of emp.children) {
+    total += countDescendants(employeeMap, childId);
+  }
+  return total;
+}
+
+
+
 
 // ================================================================
 // SECTION 19 — MAIN ORCHESTRATOR
@@ -1839,16 +1859,14 @@ function findRoots(employeeMap) {
 //   1. Parse all four sheets into clean arrays
 //   2. Build the employee map from R005
 //   3. Build the name lookup map
-//   4. Resolve all parent-child manager relationships
-//   5. Enrich nodes with new hire data (mark + add pending nodes)
-//   6. Enrich nodes with departure data (mark + add dates)
-//   7. Assemble the tree and detect orphans
-//   8. Store everything in STATE
-//   9. Print a verification summary to the console
-//
-// After this runs, STATE.tree contains the full hierarchy.
-// Open DevTools (F12 → Console) to inspect the output
-// and verify the tree is correct before Section 3 adds rendering.
+//   4. Detect root nodes from MC Level 03/04 + create synthetic nodes
+//      *** Must run before resolveManagerships ***
+//   5. Resolve all parent-child manager relationships
+//   6. Enrich nodes with new hire data
+//   7. Enrich nodes with departure data
+//   8. Find roots and detect orphans
+//   9. Store everything in STATE
+//  10. Print a verification summary to the console
 // ================================================================
 
 function buildOrgData() {
@@ -1859,12 +1877,10 @@ function buildOrgData() {
   const r005Rows      = parseSheet('r005');
   const newHireRows   = parseSheet('newHire');
   const departureRows = parseSheet('departures');
-  const openReqRows   = parseSheet('openReqs');
 
-  // Store raw parsed rows in STATE for use by the summary table later
   STATE.rawData.newHires   = newHireRows;
   STATE.rawData.departures = departureRows;
-  STATE.rawData.openReqs   = openReqRows;
+  STATE.rawData.openReqs   = parseSheet('openReqs');
 
   // ── Step 2: Build employee map from R005 ─────────────────
   const employeeMap = buildEmployeeMap(r005Rows);
@@ -1872,45 +1888,46 @@ function buildOrgData() {
   // ── Step 3: Build name lookup map ────────────────────────
   const nameMap = buildNameMap(employeeMap);
 
-  // ── Step 4: Resolve manager relationships ────────────────
+  // ── Step 4: Detect roots + create synthetic nodes ────────
+  // Must run before resolveManagerships so that SVP/VP nodes
+  // without R005 rows exist in nameMap when lookups happen
+  detectAndCreateRootNodes(employeeMap, nameMap);
+
+  // ── Step 5: Resolve manager relationships ────────────────
   resolveManagerships(employeeMap, nameMap);
 
-  // ── Step 5: Enrich with new hire data ────────────────────
+  // ── Step 6: Enrich with new hire data ────────────────────
   enrichNewHires(employeeMap, nameMap, newHireRows);
 
-  // ── Step 6: Enrich with departure data ───────────────────
+  // ── Step 7: Enrich with departure data ───────────────────
   enrichDepartures(employeeMap, nameMap, departureRows);
 
-  // ── Step 7: Assemble tree + detect orphans ───────────────
-  const { root, orphans } = assembleTree(employeeMap);
+  // ── Step 8: Find roots + detect orphans ──────────────────
+  const { roots, orphans } = findRoots(employeeMap);
 
-  // ── Step 8: Store in STATE ───────────────────────────────
+  // ── Step 9: Store in STATE ───────────────────────────────
   STATE.employeeMap = employeeMap;
   STATE.nameMap     = nameMap;
-  STATE.tree        = root;
+  STATE.roots       = roots;
   STATE.orphans     = orphans;
 
-  // ── Step 9: Console verification output ─────────────────
-  // Open F12 → Console to inspect this before Section 3.
-  // Verify: correct root, correct headcount, zero unexpected orphans.
-
+  // ── Step 10: Console verification output ─────────────────
   const totalNodes     = Object.keys(employeeMap).length;
+  const syntheticCount = Object.values(employeeMap).filter(e => e.isSynthetic).length;
   const pendingCount   = Object.values(employeeMap).filter(e => e.isPending).length;
   const departingCount = Object.values(employeeMap).filter(e => e.isDeparting).length;
   const newHireCount   = Object.values(employeeMap).filter(e => e.isNewHire).length;
   const onLeaveCount   = Object.values(employeeMap).filter(e => e.isOnLeave).length;
-  const treeDepth      = root ? getTreeDepth(employeeMap, root.id) : 0;
 
   console.log('✅ Section 2 complete — hierarchy built');
   console.log('─────────────────────────────────────────');
-  console.log('🌳 Root node:      ', root ? `${root.fullName} (${root.businessTitle})` : 'NOT FOUND — check data');
-  console.log('👥 Total nodes:    ', totalNodes);
-  console.log('📊 Tree depth:     ', treeDepth, 'levels');
+  console.log('🌳 Root nodes:  ', roots.length > 0 ? roots.map(r => r.fullName).join(', ') : 'NONE FOUND — check MC Level 03/04 columns');
+  console.log('👥 Total nodes: ', totalNodes, `(${syntheticCount} synthetic)`);
   console.log('─────────────────────────────────────────');
-  console.log('🆕 New hires:      ', newHireCount, `(${pendingCount} not yet in R005)`);
-  console.log('👋 Departing:      ', departingCount);
-  console.log('🏖  On leave:      ', onLeaveCount);
-  console.log('⚠️  Orphans:        ', orphans.length, orphans.length > 0 ? '← investigate these' : '');
+  console.log('🆕 New hires:   ', newHireCount, `(${pendingCount} not yet in R005)`);
+  console.log('👋 Departing:   ', departingCount);
+  console.log('🏖  On leave:   ', onLeaveCount);
+  console.log('⚠️  Orphans:     ', orphans.length, orphans.length > 0 ? '← investigate' : '');
   console.log('─────────────────────────────────────────');
   console.log('📋 Full employee map (expand to inspect):', employeeMap);
 
@@ -1919,25 +1936,21 @@ function buildOrgData() {
     orphans.forEach(o => console.warn(`   - ${o.fullName} | ${o.businessTitle} | ID: ${o.employeeId}`));
   }
 
-  if (!root) {
-    console.error('❌ No root node found. Possible causes:');
-    console.error('   - R005 sheet has no employees with resolvable managers');
-    console.error('   - Management chain columns are missing or misnamed');
-    console.error('   - Worker\'s Manager field values don\'t match names in the data');
+  if (roots.length === 0) {
+    console.error('❌ No root nodes found. Possible causes:');
+    console.error('   - MC Level 03 / Level 04 columns are missing or misnamed in R005');
+    console.error('   - Management Chain columns were not detected during mapping');
     return;
   }
 
-  console.log('─────────────────────────────────────────');
   console.log('✅ Tree looks good. Ready for Section 3 (rendering).');
 
-  // Section 3 will replace this alert
   alert(
     'Section 2 complete!\n\n' +
-    `Root: ${root.fullName}\n` +
+    `Roots found: ${roots.map(r => r.fullName).join(', ')}\n` +
     `Total people: ${totalNodes}\n` +
     `Orphans: ${orphans.length}\n\n` +
-    'Open the browser console (F12 → Console) to inspect\n' +
-    'the full hierarchy before Section 3 is added.'
+    'Open F12 → Console to inspect the full hierarchy.'
   );
 }
 
