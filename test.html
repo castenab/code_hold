@@ -1705,69 +1705,128 @@ function enrichDepartures(employeeMap, nameMap, departureRows) {
 
 
 // ================================================================
-// SECTION 18 — TREE ASSEMBLY + ORPHAN DETECTION
+// SECTION 18 — ROOT NODE DETECTION
 //
-// At this point every employee has a parentId (or null).
-// This function:
-//   1. Finds the root node — the person with no parent who has children
-//      (the VP at the top of the org)
-//   2. Identifies orphans — employees with no parent AND no children
-//      These are data quality issues (broken management chain)
-//
-// If multiple root candidates exist (e.g. the data includes multiple
-// VP orgs), we pick the one with the most total descendants.
-//
-// The root node is stored in STATE.tree.
-// Orphans are stored in STATE.orphans and flagged for the UI.
+// Scans MC Level 03 and Level 04 across all employee rows.
+// Collects every unique name at those levels.
+// Creates synthetic nodes for any SVP or VP who doesn't
+// have their own R005 row, so the tree has something to attach to.
+// Synthetic L04 nodes are immediately linked to their L03 parent
+// since they have no Worker's Manager field to resolve from.
+// Real L04 nodes (with R005 rows) are linked later by
+// resolveManagerships() which finds the synthetic L03 node
+// via the nameMap.
 // ================================================================
 
-function assembleTree(employeeMap) {
-  const rootCandidates = [];
-  const orphans        = [];
+function detectAndCreateRootNodes(employeeMap, nameMap) {
 
+  const level03Names = {}; // name → count
+  const level04ToL03 = {}; // l04 name → l03 name
+
+  // Scan every employee's MC Level 03 and Level 04 values
   for (const emp of Object.values(employeeMap)) {
-    if (emp.parentId !== null) continue; // has a parent — not a root or orphan
+    if (emp.isSynthetic) continue;
 
-    if (emp.children.length > 0) {
-      rootCandidates.push(emp.id); // no parent + has children = root candidate
-    } else {
-      orphans.push(emp);           // no parent + no children = orphan
+    const l03 = (emp.managementChain[3] || '').trim();
+    const l04 = (emp.managementChain[4] || '').trim();
+
+    if (l03) {
+      level03Names[l03] = (level03Names[l03] || 0) + 1;
+    }
+    if (l04 && l03) {
+      // Track which L03 this L04 consistently appears with
+      level04ToL03[l04] = l03;
     }
   }
 
-  // Pick the root with the most total descendants
-  let root = null;
+  // Create synthetic nodes for L03 names not in R005
+  for (const name of Object.keys(level03Names)) {
+    const normName = normalize(name);
+    if (!nameMap[normName]) {
+      const id = `SYNTHETIC_L03_${normName.replace(/\s+/g, '_')}`;
+      employeeMap[id] = createSyntheticNode(id, name, 3);
+      nameMap[normName] = id;
+    }
+  }
 
-  if (rootCandidates.length === 1) {
-    root = employeeMap[rootCandidates[0]];
+  // Create synthetic nodes for L04 names not in R005
+  // and immediately link them to their L03 parent
+  for (const [l04Name, l03Name] of Object.entries(level04ToL03)) {
+    const normL04 = normalize(l04Name);
 
-  } else if (rootCandidates.length > 1) {
-    let maxCount = -1;
-    for (const candidateId of rootCandidates) {
-      const count = countDescendants(employeeMap, candidateId);
-      if (count > maxCount) {
-        maxCount = count;
-        root     = employeeMap[candidateId];
+    if (!nameMap[normL04]) {
+      const id = `SYNTHETIC_L04_${normL04.replace(/\s+/g, '_')}`;
+      employeeMap[id] = createSyntheticNode(id, l04Name, 4);
+      nameMap[normL04] = id;
+
+      // Link synthetic L04 → L03 parent now
+      // (real L04 nodes are linked by resolveManagerships)
+      const l03Id = nameMap[normalize(l03Name)];
+      if (l03Id && employeeMap[l03Id]) {
+        employeeMap[id].parentId = l03Id;
+        if (!employeeMap[l03Id].children.includes(id)) {
+          employeeMap[l03Id].children.push(id);
+        }
       }
     }
   }
-
-  return { root, orphans };
 }
 
 /**
- * countDescendants()
- * Recursively counts all nodes below a given employee.
- * Used to identify the largest root candidate.
+ * createSyntheticNode()
+ * Builds a placeholder node for an SVP or VP who appears
+ * in MC columns but has no R005 row of their own.
  */
-function countDescendants(employeeMap, empId) {
-  const emp = employeeMap[empId];
-  if (!emp || emp.children.length === 0) return 0;
-  let total = emp.children.length;
-  for (const childId of emp.children) {
-    total += countDescendants(employeeMap, childId);
+function createSyntheticNode(id, name, managementLevel) {
+  return {
+    id,
+    fullName:        name,
+    firstName:       null,
+    lastName:        null,
+    employeeId:      null,
+    businessTitle:   null,
+    globalGrade:     null,
+    employmentType:  null,
+    workCountry:     null,
+    isSynthetic:     true,
+    managementLevel,
+    isOnLeave:       false,
+    isNewHire:       false,
+    isDeparting:     false,
+    isPending:       false,
+    startDate:       null,
+    departureDate:   null,
+    comments:        null,
+    managementChain: {},
+    directManager:   null,
+    managerL02:      null,
+    parentId:        null,
+    children:        [],
+  };
+}
+
+/**
+ * findRoots()
+ * After all resolution is complete, collects every node
+ * that has no parent but has children.
+ * These are the L03 SVP-level roots.
+ * Nodes with no parent AND no children are orphans —
+ * flagged as data quality issues.
+ */
+function findRoots(employeeMap) {
+  const roots   = [];
+  const orphans = [];
+
+  for (const emp of Object.values(employeeMap)) {
+    if (emp.parentId !== null) continue;
+    if (emp.children.length > 0) {
+      roots.push(emp);
+    } else {
+      orphans.push(emp);
+    }
   }
-  return total;
+
+  return { roots, orphans };
 }
 
 
