@@ -2027,34 +2027,66 @@ function enrichDepartures(employeeMap, nameMap, departureRows) {
 
 function detectAndCreateRootNodes(employeeMap, nameMap) {
 
-  const level03Names = {}; // name → count
-  const level04ToL03 = {}; // l04 name → l03 name
+  // Scan all meaningful MC levels top-down
+  // Level 03 = SVP roots, Level 04 = VP, Level 05-10 = hierarchy below
+  const SCAN_LEVELS = [3, 4, 5, 6, 7, 8, 9, 10];
 
-  // Scan every employee row's MC Level 03 and Level 04 values
+  // For each level, collect every unique name that appears there
+  // and which parent name sits directly above them in the same row
+  const levelNames = {};
+  for (const level of SCAN_LEVELS) {
+    levelNames[level] = {}; // name → parentName
+  }
+
   for (const emp of Object.values(employeeMap)) {
     if (emp.isSynthetic) continue;
 
-    const l03 = (emp.managementChain[3] || '').trim();
-    const l04 = (emp.managementChain[4] || '').trim();
+    for (let i = 0; i < SCAN_LEVELS.length; i++) {
+      const level = SCAN_LEVELS[i];
+      const name  = (emp.managementChain[level] || '').trim();
+      if (!name) continue;
 
-    if (l03) {
-      level03Names[l03] = (level03Names[l03] || 0) + 1;
-    }
-    if (l04 && l03) {
-      // Track which L03 this L04 consistently appears with
-      level04ToL03[l04] = l03;
+      // Find nearest populated level above this one in the same row
+      let parentName = null;
+      for (let j = i - 1; j >= 0; j--) {
+        const pName = (emp.managementChain[SCAN_LEVELS[j]] || '').trim();
+        if (pName) { parentName = pName; break; }
+      }
+
+      // Only store first occurrence — parent relationship is consistent
+      if (!(name in levelNames[level])) {
+        levelNames[level][name] = parentName;
+      }
     }
   }
 
-  // Create synthetic nodes for L03 names not in R005
-  for (const name of Object.keys(level03Names)) {
-    const normName = normalize(name);
-    if (!nameMap[normName]) {
-      const id = `SYNTHETIC_L03_${normName.replace(/\s+/g, '_')}`;
-      employeeMap[id] = createSyntheticNode(id, name, 3);
-      nameMap[normName] = id;
+  // Process top-down so parents always exist in nameMap
+  // before we try to link their children to them
+  for (const level of SCAN_LEVELS) {
+    for (const [name, parentName] of Object.entries(levelNames[level])) {
+      const normName = normalize(name);
+
+      // Only create a synthetic node if this person has no R005 row
+      if (!nameMap[normName]) {
+        const id = `SYNTHETIC_L${String(level).padStart(2, '0')}_${normName.replace(/\s+/g, '_')}`;
+        employeeMap[id] = createSyntheticNode(id, name, level);
+        nameMap[normName] = id;
+
+        // Link synthetic node to its parent immediately.
+        // Real nodes (with R005 rows) are linked by resolveManagerships().
+        if (parentName) {
+          const parentId = nameMap[normalize(parentName)];
+          if (parentId && employeeMap[parentId] && parentId !== id) {
+            employeeMap[id].parentId = parentId;
+            if (!employeeMap[parentId].children.includes(id)) {
+              employeeMap[parentId].children.push(id);
+            }
+          }
+        }
+      }
     }
   }
+}
 
   // Create synthetic nodes for L04 names not in R005
   // and immediately link them to their L03 parent
@@ -2077,7 +2109,6 @@ function detectAndCreateRootNodes(employeeMap, nameMap) {
       }
     }
   }
-}
 
 function createSyntheticNode(id, name, managementLevel) {
   return {
