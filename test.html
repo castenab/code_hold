@@ -751,10 +751,23 @@ const SHEET_DEFINITIONS = {
 // ================================================================
 
 const STATE = {
-  workbook:  null,
-  sheetMap:  {},
-  headers:   {},
-  columnMap: {},
+  // Section 1 — file & mapping
+  workbook:        null,
+  sheetMap:        {},
+  headers:         {},
+  headerRowIndex:  {},
+  columnMap:       {},
+
+  // Section 2 — hierarchy data
+  employeeMap:     {},   // all employees keyed by Employee ID
+  nameMap:         {},   // employee lookup keyed by normalised full name
+  tree:            null, // root node of the resolved org tree
+  orphans:         [],   // employees whose manager could not be resolved
+  rawData: {
+    newHires:    [],     // parsed rows from New Hire sheet
+    departures:  [],     // parsed rows from Departures sheet
+    openReqs:    [],     // parsed rows from Open Reqs sheet
+  },
 };
 
 
@@ -1280,21 +1293,606 @@ function confirmMapping() {
       detectManagementChainColumns(STATE.headers.r005);
   }
 
-  // ── Section 1 complete ──────────────────────────────────
-  // Open browser DevTools (F12 → Console) to inspect the output.
-  console.log('✅ Section 1 complete');
-  console.log('📋 Sheet map (tab name matched to each report):', STATE.sheetMap);
-  console.log('🗺️  Column map (field → column name):', STATE.columnMap);
-  console.log('📊 Raw headers per sheet:', STATE.headers);
+  // ── Hand off to Section 2 ───────────────────────────────
+  buildOrgData();
+}
 
-  // ── Placeholder for Section 2 ───────────────────────────
-  // This alert will be replaced by the hierarchy builder in Section 2.
+
+// ================================================================
+// SECTION 12 — DATE HELPERS
+//
+// Workday exports dates in different formats depending on the cell type.
+// SheetJS returns them as JavaScript Date objects when cellDates: true,
+// but sometimes they arrive as plain text strings.
+// These helpers normalise both cases.
+// ================================================================
+
+/**
+ * parseDate()
+ * Accepts a Date object, a date string, or null.
+ * Always returns a JavaScript Date object — or null if unparseable.
+ */
+function parseDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * formatDate()
+ * Formats a date for display: "Apr 1, 2025"
+ */
+function formatDate(date) {
+  const d = parseDate(date);
+  if (!d) return null;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+
+// ================================================================
+// SECTION 13 — RAW DATA PARSER
+//
+// Reads every row from a sheet and converts it into a clean
+// JavaScript object using the confirmed column mapping.
+//
+// How it works:
+//   1. Load the worksheet from the workbook
+//   2. Skip to the header row (detected in Section 1)
+//   3. Build a position map: fieldKey → column index
+//      e.g. { firstName: 2, lastName: 3, employeeId: 0, ... }
+//   4. For each data row after the header, extract values
+//      by position and store under the field key
+//
+// Returns an array of plain objects — one per data row.
+// Empty rows (all blank cells) are automatically skipped.
+// ================================================================
+
+function parseSheet(reportKey) {
+
+  // Return empty array if this sheet wasn't in the uploaded workbook
+  if (!STATE.sheetMap[reportKey]) return [];
+
+  const worksheet   = STATE.workbook.Sheets[STATE.sheetMap[reportKey]];
+  const headerRow   = STATE.headerRowIndex[reportKey] || 0;
+
+  // header: 1 returns raw arrays — [ [row1col1, row1col2, ...], [row2...], ... ]
+  const allRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, cellDates: true });
+
+  // The confirmed header row — gives us column names by position
+  const headerCells = (allRows[headerRow] || []).map(h => (h || '').toString().trim());
+
+  // Build a lookup: fieldKey → column index
+  // e.g. { firstName: 2, lastName: 3, employeeId: 0 }
+  const colMap       = STATE.columnMap[reportKey] || {};
+  const fieldIndexes = {};
+
+  for (const [fieldKey, colName] of Object.entries(colMap)) {
+    if (!colName || typeof colName !== 'string') continue;
+    const idx = headerCells.indexOf(colName);
+    if (idx !== -1) fieldIndexes[fieldKey] = idx;
+  }
+
+  // For R005: also map every management chain column by index
+  // These are stored as managementChainCols in the columnMap
+  const chainIndexes = {}; // { 1: colIndex, 2: colIndex, ... 10: colIndex }
+  if (reportKey === 'r005' && Array.isArray(colMap.managementChainCols)) {
+    for (const chainCol of colMap.managementChainCols) {
+      const idx = headerCells.indexOf(chainCol);
+      if (idx === -1) continue;
+      // Extract level number from column name
+      // "Management Chain - Level 04" → 4
+      const match = chainCol.match(/(\d+)\s*$/);
+      if (match) chainIndexes[parseInt(match[1])] = idx;
+    }
+  }
+
+  // Parse every data row that comes after the header
+  const results = [];
+
+  for (let i = headerRow + 1; i < allRows.length; i++) {
+    const row = allRows[i] || [];
+
+    // Skip rows where every cell is blank
+    if (row.every(cell => cell === null || cell === undefined || cell === '')) continue;
+
+    const obj = {};
+
+    // Extract each mapped field by its column index
+    for (const [fieldKey, idx] of Object.entries(fieldIndexes)) {
+      const cell = row[idx];
+      if (cell instanceof Date) {
+        obj[fieldKey] = cell; // preserve Date objects for date fields
+      } else if (cell !== null && cell !== undefined) {
+        obj[fieldKey] = cell.toString().trim();
+      } else {
+        obj[fieldKey] = null;
+      }
+    }
+
+    // R005 only: extract management chain levels into a nested object
+    // Result: { managementChain: { 1: "CEO Name", 2: "SVP Name", ... } }
+    if (reportKey === 'r005') {
+      obj.managementChain = {};
+      for (const [level, idx] of Object.entries(chainIndexes)) {
+        const cell = row[idx];
+        if (cell && cell.toString().trim()) {
+          obj.managementChain[parseInt(level)] = cell.toString().trim();
+        }
+      }
+    }
+
+    results.push(obj);
+  }
+
+  return results;
+}
+
+
+// ================================================================
+// SECTION 14 — EMPLOYEE MAP BUILDER
+//
+// Takes the parsed R005 rows and builds a keyed lookup object.
+// Key = Employee ID. Value = a rich employee node object.
+//
+// Each node stores:
+//   - All fields from the data (name, title, grade, etc.)
+//   - An empty children array (filled in during hierarchy resolution)
+//   - Status flags (isNewHire, isDeparting, isOnLeave)
+//   - parentId — set during hierarchy resolution
+//
+// Why key by Employee ID?
+//   It's the reliable join key across all four reports.
+//   Names can have formatting differences; IDs are unique and stable.
+// ================================================================
+
+function buildEmployeeMap(r005Rows) {
+  const employeeMap = {};
+
+  for (const row of r005Rows) {
+
+    // Skip rows with no meaningful data
+    if (!row.employeeId && !row.firstName && !row.lastName) continue;
+
+    const fullName = `${row.firstName || ''} ${row.lastName || ''}`.trim();
+    const id       = (row.employeeId || '').toString().trim() || `ID_${fullName}`;
+
+    // Determine on-leave status
+    // Workday exports this as a date string if on leave, blank if not
+    const onLeaveValue  = (row.onLeave || '').toString().trim().toLowerCase();
+    const isOnLeave     = onLeaveValue !== '' && onLeaveValue !== 'no' && onLeaveValue !== 'false';
+
+    employeeMap[id] = {
+      // Identity
+      id,
+      fullName,
+      firstName:       row.firstName      || null,
+      lastName:        row.lastName       || null,
+      employeeId:      row.employeeId     || null,
+
+      // Role
+      businessTitle:   row.businessTitle  || null,
+      globalGrade:     row.globalGrade    || null,
+      employmentType:  row.employmentType || null,
+      workCountry:     row.workCountry    || null,
+
+      // Manager resolution fields (used in Section 15)
+      directManager:   row.directManager  || null,
+      managerL02:      row.managerL02     || null,
+      managementChain: row.managementChain || {},
+
+      // Annotation
+      comments:        row.comments       || null,
+
+      // Status flags — updated later when we process other reports
+      isOnLeave,
+      isNewHire:    false,
+      isDeparting:  false,
+      isPending:    false, // true for new hires not yet in R005
+
+      // Dates — populated when enriching from New Hire / Departures sheets
+      startDate:      null,
+      departureDate:  null,
+
+      // Tree structure — populated in Section 16
+      parentId:  null,
+      children:  [],    // array of Employee IDs (not objects)
+    };
+  }
+
+  return employeeMap;
+}
+
+
+// ================================================================
+// SECTION 15 — NAME MAP BUILDER
+//
+// Builds a second lookup keyed by normalised full name.
+// Used when resolving managers — manager fields contain names, not IDs.
+//
+// e.g. nameMap["sarah chen"] = "EMP001"
+//
+// Normalisation (trim + lowercase) means "Sarah Chen", "SARAH CHEN",
+// and "sarah chen " all resolve to the same employee.
+// ================================================================
+
+function buildNameMap(employeeMap) {
+  const nameMap = {};
+  for (const emp of Object.values(employeeMap)) {
+    const normName = normalize(emp.fullName);
+    if (normName) nameMap[normName] = emp.id;
+  }
+  return nameMap;
+}
+
+
+// ================================================================
+// SECTION 16 — MANAGER RESOLUTION
+//
+// For every employee, attempts to find their direct manager
+// using the three-step priority rule from the requirements:
+//
+//   Priority 1 — Worker's Manager field
+//     Direct name match against the employee map.
+//     This is the most reliable field.
+//
+//   Priority 2 — Manager Level 02
+//     Used when Worker's Manager is blank or doesn't resolve.
+//     This is the manager's manager — a skip-level relationship —
+//     but better than nothing if Priority 1 fails.
+//
+//   Priority 3 — Management Chain columns
+//     Walk from the deepest level (L10) upward to L01.
+//     The deepest populated level is the most direct known manager.
+//     Used when both named manager fields fail to resolve.
+//
+// When a manager is found:
+//   - emp.parentId is set to the manager's Employee ID
+//   - The manager's children array gets the employee's ID added
+//
+// When no manager resolves: the employee is left with parentId = null.
+// These are identified as orphans in Section 18.
+// ================================================================
+
+function resolveManagerships(employeeMap, nameMap) {
+
+  for (const emp of Object.values(employeeMap)) {
+    let managerId = null;
+
+    // ── Priority 1: Worker's Manager field ──────────────────
+    if (emp.directManager) {
+      const normName = normalize(emp.directManager);
+      managerId = nameMap[normName] || null;
+    }
+
+    // ── Priority 2: Manager Level 02 ────────────────────────
+    if (!managerId && emp.managerL02) {
+      const normName = normalize(emp.managerL02);
+      managerId = nameMap[normName] || null;
+    }
+
+    // ── Priority 3: Management Chain columns ─────────────────
+    // Sort levels descending so we try the deepest (most direct) first
+    if (!managerId && emp.managementChain) {
+      const levels = Object.entries(emp.managementChain)
+        .filter(([, name]) => name && name.trim())
+        .map(([level, name]) => ({ level: parseInt(level), name }))
+        .sort((a, b) => b.level - a.level); // deepest level first
+
+      for (const { name } of levels) {
+        const normName    = normalize(name);
+        const candidateId = nameMap[normName];
+
+        // Ensure we don't point an employee to themselves
+        if (candidateId && candidateId !== emp.id) {
+          managerId = candidateId;
+          break;
+        }
+      }
+    }
+
+    // ── Store result ─────────────────────────────────────────
+    if (managerId && employeeMap[managerId]) {
+      emp.parentId = managerId;
+      employeeMap[managerId].children.push(emp.id);
+    }
+    // If managerId still null → employee has no resolvable parent
+    // They will be picked up as an orphan in Section 18
+  }
+}
+
+
+// ================================================================
+// SECTION 17 — ENRICH WITH NEW HIRE AND DEPARTURE DATA
+//
+// Cross-references the New Hire and Departures sheets against R005
+// using Employee ID as the join key (per cross-report analysis rules).
+//
+// NEW HIRES:
+//   Case A — Employee ID found in R005:
+//     The person has already started. Mark isNewHire = true,
+//     attach their start date.
+//
+//   Case B — Employee ID not in R005:
+//     The person hasn't started yet. Create a "pending" node.
+//     Infer their manager by matching their L5 value against
+//     existing employee names in nameMap.
+//     Mark isPending = true so the chart renders them differently.
+//
+// DEPARTURES:
+//   Find the employee in R005 by Employee ID.
+//   Set isDeparting = true and attach the departure date.
+// ================================================================
+
+function enrichNewHires(employeeMap, nameMap, newHireRows) {
+  for (const hire of newHireRows) {
+    if (!hire.resourceName && !hire.employeeId) continue;
+
+    const hireId = (hire.employeeId || '').toString().trim();
+
+    // Case A — already in R005
+    if (hireId && employeeMap[hireId]) {
+      employeeMap[hireId].isNewHire  = true;
+      employeeMap[hireId].startDate  = parseDate(hire.startDate);
+      continue;
+    }
+
+    // Case B — not yet in R005, create a pending node
+    const pendingId = hireId || `PENDING_${normalize(hire.resourceName || '').replace(/\s+/g, '_')}`;
+
+    const pendingNode = {
+      id:             pendingId,
+      fullName:       hire.resourceName || 'TBH',
+      firstName:      null,
+      lastName:       null,
+      employeeId:     hireId || null,
+      businessTitle:  hire.jobTitle      || null,
+      globalGrade:    hire.positionLevel || null,
+      employmentType: null,  // unknown until they appear in R005
+      workCountry:    null,
+      isOnLeave:      false,
+      isNewHire:      true,
+      isDeparting:    false,
+      isPending:      true,
+      startDate:      parseDate(hire.startDate),
+      departureDate:  null,
+      comments:       null,
+      managementChain: {},
+      directManager:  null,
+      managerL02:     null,
+      parentId:       null,
+      children:       [],
+      l4:             hire.l4 || null,
+      l5:             hire.l5 || null,
+    };
+
+    // Infer manager from L5 — find the employee whose name matches L5
+    if (hire.l5) {
+      const normL5      = normalize(hire.l5);
+      const inferredMgr = nameMap[normL5];
+      if (inferredMgr && employeeMap[inferredMgr]) {
+        pendingNode.parentId = inferredMgr;
+        employeeMap[inferredMgr].children.push(pendingId);
+      }
+    }
+
+    employeeMap[pendingId] = pendingNode;
+  }
+}
+
+function enrichDepartures(employeeMap, nameMap, departureRows) {
+  for (const dep of departureRows) {
+    if (!dep.resourceName && !dep.employeeId) continue;
+
+    const depId = (dep.employeeId || '').toString().trim();
+
+    // Primary: match by Employee ID
+    let emp = depId ? employeeMap[depId] : null;
+
+    // Fallback: normalised name match
+    if (!emp && dep.resourceName) {
+      const normName = normalize(dep.resourceName);
+      const foundId  = nameMap[normName];
+      if (foundId) emp = employeeMap[foundId];
+    }
+
+    if (emp) {
+      emp.isDeparting   = true;
+      emp.departureDate = parseDate(dep.departureDate);
+    }
+  }
+}
+
+
+// ================================================================
+// SECTION 18 — TREE ASSEMBLY + ORPHAN DETECTION
+//
+// At this point every employee has a parentId (or null).
+// This function:
+//   1. Finds the root node — the person with no parent who has children
+//      (the VP at the top of the org)
+//   2. Identifies orphans — employees with no parent AND no children
+//      These are data quality issues (broken management chain)
+//
+// If multiple root candidates exist (e.g. the data includes multiple
+// VP orgs), we pick the one with the most total descendants.
+//
+// The root node is stored in STATE.tree.
+// Orphans are stored in STATE.orphans and flagged for the UI.
+// ================================================================
+
+function assembleTree(employeeMap) {
+  const rootCandidates = [];
+  const orphans        = [];
+
+  for (const emp of Object.values(employeeMap)) {
+    if (emp.parentId !== null) continue; // has a parent — not a root or orphan
+
+    if (emp.children.length > 0) {
+      rootCandidates.push(emp.id); // no parent + has children = root candidate
+    } else {
+      orphans.push(emp);           // no parent + no children = orphan
+    }
+  }
+
+  // Pick the root with the most total descendants
+  let root = null;
+
+  if (rootCandidates.length === 1) {
+    root = employeeMap[rootCandidates[0]];
+
+  } else if (rootCandidates.length > 1) {
+    let maxCount = -1;
+    for (const candidateId of rootCandidates) {
+      const count = countDescendants(employeeMap, candidateId);
+      if (count > maxCount) {
+        maxCount = count;
+        root     = employeeMap[candidateId];
+      }
+    }
+  }
+
+  return { root, orphans };
+}
+
+/**
+ * countDescendants()
+ * Recursively counts all nodes below a given employee.
+ * Used to identify the largest root candidate.
+ */
+function countDescendants(employeeMap, empId) {
+  const emp = employeeMap[empId];
+  if (!emp || emp.children.length === 0) return 0;
+  let total = emp.children.length;
+  for (const childId of emp.children) {
+    total += countDescendants(employeeMap, childId);
+  }
+  return total;
+}
+
+
+// ================================================================
+// SECTION 19 — MAIN ORCHESTRATOR
+//
+// buildOrgData() is called by confirmMapping() once the column
+// mapping is confirmed. It runs every step in sequence:
+//
+//   1. Parse all four sheets into clean arrays
+//   2. Build the employee map from R005
+//   3. Build the name lookup map
+//   4. Resolve all parent-child manager relationships
+//   5. Enrich nodes with new hire data (mark + add pending nodes)
+//   6. Enrich nodes with departure data (mark + add dates)
+//   7. Assemble the tree and detect orphans
+//   8. Store everything in STATE
+//   9. Print a verification summary to the console
+//
+// After this runs, STATE.tree contains the full hierarchy.
+// Open DevTools (F12 → Console) to inspect the output
+// and verify the tree is correct before Section 3 adds rendering.
+// ================================================================
+
+function buildOrgData() {
+
+  console.log('⏳ Section 2 starting — building hierarchy...');
+
+  // ── Step 1: Parse all sheets ─────────────────────────────
+  const r005Rows      = parseSheet('r005');
+  const newHireRows   = parseSheet('newHire');
+  const departureRows = parseSheet('departures');
+  const openReqRows   = parseSheet('openReqs');
+
+  // Store raw parsed rows in STATE for use by the summary table later
+  STATE.rawData.newHires   = newHireRows;
+  STATE.rawData.departures = departureRows;
+  STATE.rawData.openReqs   = openReqRows;
+
+  // ── Step 2: Build employee map from R005 ─────────────────
+  const employeeMap = buildEmployeeMap(r005Rows);
+
+  // ── Step 3: Build name lookup map ────────────────────────
+  const nameMap = buildNameMap(employeeMap);
+
+  // ── Step 4: Resolve manager relationships ────────────────
+  resolveManagerships(employeeMap, nameMap);
+
+  // ── Step 5: Enrich with new hire data ────────────────────
+  enrichNewHires(employeeMap, nameMap, newHireRows);
+
+  // ── Step 6: Enrich with departure data ───────────────────
+  enrichDepartures(employeeMap, nameMap, departureRows);
+
+  // ── Step 7: Assemble tree + detect orphans ───────────────
+  const { root, orphans } = assembleTree(employeeMap);
+
+  // ── Step 8: Store in STATE ───────────────────────────────
+  STATE.employeeMap = employeeMap;
+  STATE.nameMap     = nameMap;
+  STATE.tree        = root;
+  STATE.orphans     = orphans;
+
+  // ── Step 9: Console verification output ─────────────────
+  // Open F12 → Console to inspect this before Section 3.
+  // Verify: correct root, correct headcount, zero unexpected orphans.
+
+  const totalNodes     = Object.keys(employeeMap).length;
+  const pendingCount   = Object.values(employeeMap).filter(e => e.isPending).length;
+  const departingCount = Object.values(employeeMap).filter(e => e.isDeparting).length;
+  const newHireCount   = Object.values(employeeMap).filter(e => e.isNewHire).length;
+  const onLeaveCount   = Object.values(employeeMap).filter(e => e.isOnLeave).length;
+  const treeDepth      = root ? getTreeDepth(employeeMap, root.id) : 0;
+
+  console.log('✅ Section 2 complete — hierarchy built');
+  console.log('─────────────────────────────────────────');
+  console.log('🌳 Root node:      ', root ? `${root.fullName} (${root.businessTitle})` : 'NOT FOUND — check data');
+  console.log('👥 Total nodes:    ', totalNodes);
+  console.log('📊 Tree depth:     ', treeDepth, 'levels');
+  console.log('─────────────────────────────────────────');
+  console.log('🆕 New hires:      ', newHireCount, `(${pendingCount} not yet in R005)`);
+  console.log('👋 Departing:      ', departingCount);
+  console.log('🏖  On leave:      ', onLeaveCount);
+  console.log('⚠️  Orphans:        ', orphans.length, orphans.length > 0 ? '← investigate these' : '');
+  console.log('─────────────────────────────────────────');
+  console.log('📋 Full employee map (expand to inspect):', employeeMap);
+
+  if (orphans.length > 0) {
+    console.warn('⚠️  Orphaned employees (no manager resolved):');
+    orphans.forEach(o => console.warn(`   - ${o.fullName} | ${o.businessTitle} | ID: ${o.employeeId}`));
+  }
+
+  if (!root) {
+    console.error('❌ No root node found. Possible causes:');
+    console.error('   - R005 sheet has no employees with resolvable managers');
+    console.error('   - Management chain columns are missing or misnamed');
+    console.error('   - Worker\'s Manager field values don\'t match names in the data');
+    return;
+  }
+
+  console.log('─────────────────────────────────────────');
+  console.log('✅ Tree looks good. Ready for Section 3 (rendering).');
+
+  // Section 3 will replace this alert
   alert(
-    'Section 1 complete!\n\n' +
-    'The column mapping has been saved.\n\n' +
-    'Open the browser console (F12 → Console tab) to inspect\n' +
-    'the full mapping before Section 2 is added.'
+    'Section 2 complete!\n\n' +
+    `Root: ${root.fullName}\n` +
+    `Total people: ${totalNodes}\n` +
+    `Orphans: ${orphans.length}\n\n` +
+    'Open the browser console (F12 → Console) to inspect\n' +
+    'the full hierarchy before Section 3 is added.'
   );
+}
+
+/**
+ * getTreeDepth()
+ * Recursively finds the maximum depth of the org tree.
+ * Useful for verifying the hierarchy is built correctly.
+ */
+function getTreeDepth(employeeMap, empId, currentDepth = 0) {
+  const emp = employeeMap[empId];
+  if (!emp || emp.children.length === 0) return currentDepth;
+  return Math.max(...emp.children.map(childId =>
+    getTreeDepth(employeeMap, childId, currentDepth + 1)
+  ));
 }
 
 </script>
