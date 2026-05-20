@@ -337,6 +337,194 @@
       cursor: pointer;
     }
     .btn-secondary:hover { background: #F4F5F7; }
+
+    /* ─────────────────────────────────────────────────────────
+       SECTION 2B — ORG CHART SCREEN STYLES
+    ───────────────────────────────────────────────────────── */
+
+    /* Chart screen fills the full viewport below the topbar */
+    #screen-chart { background: #F4F5F7; }
+
+    .chart-topbar-meta {
+      font-size: 12px;
+      color: #97A0AF;
+      margin-left: 8px;
+    }
+
+    /*
+      The chart wrapper is the scrollable area.
+      overflow: auto — allows the tree to scroll in both directions
+      when it's wider or taller than the screen.
+    */
+    .chart-wrapper {
+      flex: 1;
+      overflow: auto;
+      position: relative;
+    }
+
+    /*
+      The chart canvas is the inner container that holds the tree.
+      position: relative is required so the SVG overlay (connector lines)
+      can be positioned absolutely within it.
+      display: inline-block means it grows with its content — important
+      for horizontal scrolling when the tree is wide.
+    */
+    #chart-canvas {
+      position: relative;
+      display: inline-block;
+      min-width: 100%;
+      padding: 32px 48px 64px;
+    }
+
+    /*
+      The SVG sits on top of all the nodes and draws connector lines.
+      pointer-events: none means mouse clicks pass through it to the nodes.
+      overflow: visible means lines aren't clipped at the SVG boundary.
+    */
+    #connector-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    /*
+      tree-level — a horizontal row of sibling nodes.
+      justify-content: center keeps everything centred.
+      flex-wrap: wrap handles VPs with many direct reports.
+    */
+    .tree-level {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* node-group wraps one node card and its children container */
+    .node-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /*
+      node-children holds the next level of the tree.
+      padding-top creates space for connector lines to enter from above.
+      hidden = collapsed state.
+    */
+    .node-children {
+      padding-top: 28px;
+    }
+    .node-children.hidden { display: none; }
+
+    /* ── Node card ─────────────────────────────────────────── */
+    .node-card {
+      background: #fff;
+      border: 1.5px solid #DFE1E6;
+      border-radius: 10px;
+      padding: 10px 14px;
+      min-width: 160px;
+      max-width: 200px;
+      font-size: 12px;
+      position: relative;
+      transition: box-shadow 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .node-card.has-children { cursor: pointer; }
+    .node-card.has-children:hover {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+      border-color: #B3C7E6;
+    }
+    /* Blue border when expanded */
+    .node-card.expanded { border-color: #0052CC; }
+
+    .node-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: #172B4D;
+      margin-bottom: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .node-title {
+      font-size: 11px;
+      color: #6B778C;
+      margin-bottom: 3px;
+      line-height: 1.4;
+    }
+    .node-meta {
+      font-size: 10px;
+      color: #97A0AF;
+    }
+    /* Headcount pill shown on manager nodes */
+    .node-hc {
+      font-size: 10px;
+      color: #6B778C;
+      background: #F4F5F7;
+      border-radius: 10px;
+      padding: 2px 8px;
+      display: inline-block;
+      margin-top: 6px;
+    }
+    /* Expand/collapse chevron icon */
+    .node-expand-icon {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 10px;
+      color: #97A0AF;
+      transition: transform 0.2s;
+    }
+    .node-card.expanded .node-expand-icon { transform: rotate(180deg); }
+
+    /* Synthetic nodes (no R005 row) — shown with dashed border */
+    .node-card.synthetic {
+      border-style: dashed;
+      background: #FAFBFC;
+    }
+
+    /* ── First-load hint ───────────────────────────────────── */
+    .chart-hint {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #6B778C;
+      background: #fff;
+      border: 1px solid #DFE1E6;
+      border-radius: 8px;
+      padding: 8px 14px;
+      margin: 0 auto 24px;
+      width: fit-content;
+    }
+
+    /* ── Legend ────────────────────────────────────────────── */
+    .chart-legend {
+      background: #fff;
+      border-top: 1px solid #E1E4E8;
+      padding: 10px 24px;
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #6B778C;
+    }
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.1);
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -492,6 +680,105 @@
   </div>
 
 </div><!-- end screen-mapping -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 3 — ORG CHART
+     Shown after hierarchy is built and confirmed.
+     The chart canvas is empty on load — JavaScript renders the tree.
+     The SVG element overlays the canvas to draw connector lines.
+═══════════════════════════════════════════════════════════════ -->
+<div id="screen-chart" class="screen">
+
+  <div class="topbar">
+    <div class="topbar-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3"  y="3"  width="7" height="7"/>
+        <rect x="14" y="3"  width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/>
+        <rect x="3"  y="14" width="7" height="7"/>
+      </svg>
+      Org Chart Tool
+      <span class="chart-topbar-meta" id="chart-date"></span>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-secondary" onclick="resetToUpload()">
+        ← Upload new file
+      </button>
+      <!-- Export SVG — placeholder for Section 3 -->
+      <button class="btn-secondary" id="btn-export" disabled
+              style="opacity:0.4;cursor:not-allowed;" title="Coming in Section 3">
+        Export SVG
+      </button>
+    </div>
+  </div>
+
+  <!--
+    chart-wrapper is the scrollable viewport.
+    The tree can be wider and taller than the screen —
+    overflow:auto lets users scroll in any direction.
+  -->
+  <div class="chart-wrapper" id="chart-wrapper">
+    <div id="chart-canvas">
+      <!--
+        The SVG is the first child of the canvas.
+        It sits behind nothing — pointer-events:none means
+        clicks pass through to the node cards beneath.
+        Connector lines are drawn here by drawConnectors().
+      -->
+      <svg id="connector-svg"></svg>
+
+      <!--
+        First-load hint — dismissed after first expand/collapse.
+        Hidden by default; shown by showOrgChart() on first render.
+      -->
+      <div class="chart-hint" id="chart-hint" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        Click any team card to expand their sub-tree
+      </div>
+
+      <!--
+        Tree root — JavaScript renders the full org tree here.
+        renderOrgChart() clears this div and rebuilds it each time.
+      -->
+      <div id="chart-root"></div>
+    </div>
+  </div>
+
+  <!--
+    Legend — colour coding for employment types.
+    Colours are placeholders for Section 3.
+    Section 3 will populate this dynamically from the data.
+  -->
+  <div class="chart-legend">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#AED6F1;"></div> Regular
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#A9DFBF;"></div> Contract
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#F9E79F;"></div> Student / Co-op
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#D5D8DC;"></div> Contingent / Other
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#FAD7A0;"></div> On leave
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#fff;border:1.5px dashed #aaa;"></div> New hire
+    </div>
+  </div>
+
+</div><!-- end screen-chart -->
 
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -759,15 +1046,19 @@ const STATE = {
   columnMap:       {},
 
   // Section 2 — hierarchy data
-  employeeMap:     {},   // all employees keyed by Employee ID
-  nameMap:         {},   // employee lookup keyed by normalised full name
-  roots:           [],   // array of root nodes (SVP-level, from MC Level 03)
-  orphans:         [],   // employees whose manager could not be resolved
+  employeeMap:     {},
+  nameMap:         {},
+  roots:           [],
+  orphans:         [],
   rawData: {
-    newHires:    [],     // parsed rows from New Hire sheet
-    departures:  [],     // parsed rows from Departures sheet
-    openReqs:    [],     // parsed rows from Open Reqs sheet
+    newHires:    [],
+    departures:  [],
+    openReqs:    [],
   },
+
+  // Section 2b — chart rendering state
+  expandedNodes:   new Set(), // tracks which node IDs are currently expanded
+  hintDismissed:   false,     // whether the first-load hint has been dismissed
 };
 
 
@@ -1945,13 +2236,8 @@ function buildOrgData() {
 
   console.log('✅ Tree looks good. Ready for Section 3 (rendering).');
 
-  alert(
-    'Section 2 complete!\n\n' +
-    `Roots found: ${roots.map(r => r.fullName).join(', ')}\n` +
-    `Total people: ${totalNodes}\n` +
-    `Orphans: ${orphans.length}\n\n` +
-    'Open F12 → Console to inspect the full hierarchy.'
-  );
+  // Hand off to the chart renderer
+  showOrgChart();
 }
 
 /**
@@ -1966,6 +2252,351 @@ function getTreeDepth(employeeMap, empId, currentDepth = 0) {
     getTreeDepth(employeeMap, childId, currentDepth + 1)
   ));
 }
+
+// ================================================================
+// SECTION 20 — ORG CHART RENDERER
+//
+// This section takes the hierarchy built in Section 2 and turns it
+// into a visual, interactive tree on Screen 3.
+//
+// Key functions and their responsibilities:
+//
+//   showOrgChart()       → switches to Screen 3, sets up the view
+//   renderOrgChart()     → clears the canvas and renders from roots
+//   renderNodeGroup()    → recursively renders one node + its children
+//   createNodeCard()     → builds the HTML card element for one person
+//   toggleExpand()       → shows or hides a node's children on click
+//   drawConnectors()     → draws SVG lines connecting parents to children
+//   getHeadcount()       → counts all descendants below a node
+//
+// RENDERING APPROACH:
+//   The tree is rendered as nested HTML divs — not SVG.
+//   Each node is a <div class="node-card">.
+//   Children sit inside a <div class="node-children"> below their parent.
+//   A separate SVG overlay draws the connector lines between nodes.
+//   This keeps the node HTML clean and easy to style in Section 3.
+//
+// CONNECTOR LINE APPROACH:
+//   After the HTML tree is painted, drawConnectors() reads the
+//   pixel positions of each parent and child card using
+//   getBoundingClientRect(), then draws elbow-shaped SVG paths
+//   connecting them. This is more reliable than CSS-only connectors
+//   because it adapts to any tree width or depth automatically.
+//
+// EXPAND / COLLAPSE:
+//   STATE.expandedNodes is a Set of employee IDs.
+//   When a node is in the Set → its children are visible.
+//   Clicking a card calls toggleExpand() which adds/removes the ID
+//   from the Set and shows/hides the children container.
+//   Root nodes (SVPs) are auto-expanded on first render so VP cards
+//   are immediately visible.
+// ================================================================
+
+
+// ── Entry point ──────────────────────────────────────────────────
+
+/**
+ * showOrgChart()
+ * Called by buildOrgData() after the hierarchy is ready.
+ * Switches to Screen 3 and triggers the first render.
+ */
+function showOrgChart() {
+  // Set the as-of date in the topbar
+  const today = new Date().toLocaleDateString('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric'
+  });
+  const dateEl = document.getElementById('chart-date');
+  if (dateEl) dateEl.textContent = `· As of ${today}`;
+
+  // Show Screen 3
+  showScreen('screen-chart');
+
+  // Render the tree
+  renderOrgChart();
+
+  // Show the first-load hint
+  if (!STATE.hintDismissed) {
+    const hint = document.getElementById('chart-hint');
+    if (hint) hint.style.display = 'flex';
+  }
+}
+
+
+// ── Tree rendering ────────────────────────────────────────────────
+
+/**
+ * renderOrgChart()
+ * Clears the canvas and renders the full tree from STATE.roots.
+ * Auto-expands all root nodes so VP cards are immediately visible.
+ * Called on first load and whenever the tree needs a full refresh.
+ */
+function renderOrgChart() {
+  const root = document.getElementById('chart-root');
+  root.innerHTML = '';
+
+  if (STATE.roots.length === 0) {
+    root.innerHTML = '<p style="color:#6B778C;padding:24px;">No org data to display.</p>';
+    return;
+  }
+
+  // Auto-expand root (SVP) nodes so VP level is visible immediately
+  for (const r of STATE.roots) {
+    STATE.expandedNodes.add(r.id);
+  }
+
+  // Render all roots in a single top-level row
+  const topLevel = document.createElement('div');
+  topLevel.className = 'tree-level';
+
+  for (const r of STATE.roots) {
+    topLevel.appendChild(renderNodeGroup(r.id, 0));
+  }
+
+  root.appendChild(topLevel);
+
+  // Draw connectors after the browser has laid out the DOM
+  // requestAnimationFrame waits for the next paint cycle
+  // ensuring all elements have their final positions
+  requestAnimationFrame(drawConnectors);
+}
+
+/**
+ * renderNodeGroup()
+ * Recursively renders one employee node and all its children.
+ *
+ * Structure produced:
+ *   <div class="node-group">
+ *     <div class="node-card">...</div>          ← the visible card
+ *     <div class="node-children [hidden]">       ← children container
+ *       <div class="tree-level">                 ← horizontal row of children
+ *         [renderNodeGroup for each child]
+ *       </div>
+ *     </div>
+ *   </div>
+ *
+ * depth: how many levels below root this node sits.
+ *        0 = SVP, 1 = VP, 2 = Director, etc.
+ *        Used for future depth-based styling in Section 3.
+ */
+function renderNodeGroup(empId, depth) {
+  const emp = STATE.employeeMap[empId];
+  if (!emp) return document.createDocumentFragment();
+
+  const group = document.createElement('div');
+  group.className = 'node-group';
+  group.dataset.id = empId;
+
+  // ── Node card ────────────────────────────────────────────
+  group.appendChild(createNodeCard(emp, depth));
+
+  // ── Children container ───────────────────────────────────
+  if (emp.children.length > 0) {
+    const childrenDiv = document.createElement('div');
+    childrenDiv.className = 'node-children';
+    childrenDiv.id = `children-${empId}`;
+
+    // Hide by default; unhide if this node is in expandedNodes
+    if (!STATE.expandedNodes.has(empId)) {
+      childrenDiv.classList.add('hidden');
+    }
+
+    // Row of child nodes
+    const childLevel = document.createElement('div');
+    childLevel.className = 'tree-level';
+
+    for (const childId of emp.children) {
+      childLevel.appendChild(renderNodeGroup(childId, depth + 1));
+    }
+
+    childrenDiv.appendChild(childLevel);
+    group.appendChild(childrenDiv);
+  }
+
+  return group;
+}
+
+/**
+ * createNodeCard()
+ * Builds and returns the HTML div for one employee node.
+ *
+ * Shows:
+ *   - Full name
+ *   - Business title
+ *   - Global grade · Employment type
+ *   - Headcount pill (if the node has children)
+ *   - Expand/collapse chevron (if the node has children)
+ *
+ * Section 3 will add: colour coding, status badges, on-leave indicator.
+ */
+function createNodeCard(emp, depth) {
+  const card = document.createElement('div');
+  card.className = 'node-card';
+  card.dataset.id = emp.id;
+
+  const hasChildren = emp.children.length > 0;
+  const headcount   = hasChildren ? getHeadcount(emp.id) : 0;
+
+  // Mark expanded state visually
+  if (STATE.expandedNodes.has(emp.id)) card.classList.add('expanded');
+
+  // Synthetic nodes (no R005 row) get a dashed border
+  if (emp.isSynthetic) card.classList.add('synthetic');
+
+  // Clickable only if the node has children
+  if (hasChildren) card.classList.add('has-children');
+
+  card.innerHTML = `
+    <div class="node-name" title="${emp.fullName || ''}">${emp.fullName || 'Unknown'}</div>
+    <div class="node-title">${emp.businessTitle || '—'}</div>
+    <div class="node-meta">${emp.globalGrade || '—'} · ${emp.employmentType || '—'}</div>
+    ${hasChildren
+      ? `<div class="node-hc">${headcount} ${headcount === 1 ? 'person' : 'people'}</div>
+         <div class="node-expand-icon">▾</div>`
+      : ''}
+  `;
+
+  // Attach click handler for expand/collapse
+  if (hasChildren) {
+    card.addEventListener('click', () => toggleExpand(emp.id));
+  }
+
+  return card;
+}
+
+
+// ── Expand / Collapse ─────────────────────────────────────────────
+
+/**
+ * toggleExpand()
+ * Called when a user clicks a node card.
+ * Adds or removes the node's ID from STATE.expandedNodes,
+ * then shows or hides the children container and redraws connectors.
+ */
+function toggleExpand(empId) {
+  const childrenDiv = document.getElementById(`children-${empId}`);
+  const card        = document.querySelector(`.node-card[data-id="${empId}"]`);
+
+  if (!childrenDiv) return;
+
+  if (STATE.expandedNodes.has(empId)) {
+    // ── Collapse ──────────────────────────────────────────
+    STATE.expandedNodes.delete(empId);
+    childrenDiv.classList.add('hidden');
+    if (card) card.classList.remove('expanded');
+  } else {
+    // ── Expand ────────────────────────────────────────────
+    STATE.expandedNodes.add(empId);
+    childrenDiv.classList.remove('hidden');
+    if (card) card.classList.add('expanded');
+  }
+
+  // Dismiss the first-load hint after first interaction
+  if (!STATE.hintDismissed) {
+    STATE.hintDismissed = true;
+    const hint = document.getElementById('chart-hint');
+    if (hint) hint.style.display = 'none';
+  }
+
+  // Redraw connectors after layout has updated
+  // requestAnimationFrame ensures the DOM has repainted first
+  requestAnimationFrame(drawConnectors);
+}
+
+
+// ── Connector lines ───────────────────────────────────────────────
+
+/**
+ * drawConnectors()
+ * Draws elbow-shaped SVG lines connecting each parent card
+ * to its visible children.
+ *
+ * Why SVG and not CSS?
+ *   CSS connectors are hard to position accurately when nodes
+ *   wrap onto multiple rows or have varying widths.
+ *   SVG lets us calculate exact pixel positions and draw any path.
+ *
+ * How it works:
+ *   1. For each expanded node, find the pixel centre-bottom of the parent card
+ *   2. For each child, find the pixel centre-top of the child card
+ *   3. Draw an elbow path: down from parent → across → down to child
+ *
+ * Coordinates are calculated relative to #chart-canvas so the lines
+ * stay aligned with the nodes as the user scrolls.
+ */
+function drawConnectors() {
+  const canvas = document.getElementById('chart-canvas');
+  const svg    = document.getElementById('connector-svg');
+  if (!canvas || !svg) return;
+
+  // Size the SVG to match the full canvas dimensions
+  svg.setAttribute('width',  canvas.scrollWidth);
+  svg.setAttribute('height', canvas.scrollHeight);
+  svg.innerHTML = ''; // clear previous lines
+
+  const canvasRect = canvas.getBoundingClientRect();
+
+  for (const empId of STATE.expandedNodes) {
+    const emp = STATE.employeeMap[empId];
+    if (!emp || emp.children.length === 0) continue;
+
+    const childrenDiv = document.getElementById(`children-${empId}`);
+    if (!childrenDiv || childrenDiv.classList.contains('hidden')) continue;
+
+    // Find the parent card's centre-bottom position
+    const parentCard = canvas.querySelector(`.node-card[data-id="${empId}"]`);
+    if (!parentCard) continue;
+
+    const parentRect = parentCard.getBoundingClientRect();
+    // Subtract canvasRect to get canvas-relative coordinates
+    const parentX = parentRect.left - canvasRect.left + parentRect.width / 2;
+    const parentY = parentRect.bottom - canvasRect.top;
+
+    for (const childId of emp.children) {
+      const childCard = canvas.querySelector(`.node-card[data-id="${childId}"]`);
+      if (!childCard) continue;
+
+      const childRect = childCard.getBoundingClientRect();
+      const childX = childRect.left - canvasRect.left + childRect.width / 2;
+      const childY = childRect.top - canvasRect.top;
+
+      // Midpoint Y — the horizontal crossbar of the elbow connector
+      const midY = parentY + (childY - parentY) / 2;
+
+      /*
+       * Elbow path:
+       *   M parentX parentY        → start at centre-bottom of parent
+       *   L parentX midY           → go down to the crossbar
+       *   L childX  midY           → go across to above the child
+       *   L childX  childY         → go down to centre-top of child
+       */
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${parentX} ${parentY} L ${parentX} ${midY} L ${childX} ${midY} L ${childX} ${childY}`);
+      path.setAttribute('stroke', '#C1C7D0');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('fill', 'none');
+      svg.appendChild(path);
+    }
+  }
+}
+
+// Redraw connectors when the window is resized
+// (node positions change on resize)
+window.addEventListener('resize', () => {
+  requestAnimationFrame(drawConnectors);
+});
+
+
+// ── Headcount helper ──────────────────────────────────────────────
+
+/**
+ * getHeadcount()
+ * Returns the total number of people below a given node.
+ * Calls the recursive countDescendants() from Section 18.
+ */
+function getHeadcount(empId) {
+  return countDescendants(STATE.employeeMap, empId);
+}
+
 
 </script>
 </body>
