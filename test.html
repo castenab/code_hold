@@ -525,6 +525,39 @@
       border: 1px solid rgba(0,0,0,0.1);
       flex-shrink: 0;
     }
+
+    /* ── Status badges ─────────────────────────────────────────── */
+    /*
+      Badges float above the top-right corner of each node card.
+      position: absolute works because .node-card has position: relative.
+      top: -9px pulls the badge upward so it sits on the card border.
+    */
+    .node-badge {
+      position: absolute;
+      top: -9px;
+      right: 6px;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 10px;
+      white-space: nowrap;
+      line-height: 1.6;
+    }
+    .node-badge.departing {
+      background: #FADBD8;
+      color:      #922B21;
+      border: 1px solid #F1948A;
+    }
+    .node-badge.on-leave {
+      background: #FAD7A0;
+      color:      #784212;
+      border: 1px solid #E59866;
+    }
+    .node-badge.new-hire {
+      background: #fff;
+      color:      #172B4D;
+      border: 1.5px dashed #aaa;
+    }
   </style>
 </head>
 <body>
@@ -2027,66 +2060,34 @@ function enrichDepartures(employeeMap, nameMap, departureRows) {
 
 function detectAndCreateRootNodes(employeeMap, nameMap) {
 
-  // Scan all meaningful MC levels top-down
-  // Level 03 = SVP roots, Level 04 = VP, Level 05-10 = hierarchy below
-  const SCAN_LEVELS = [3, 4, 5, 6, 7, 8, 9, 10];
+  const level03Names = {}; // name → count
+  const level04ToL03 = {}; // l04 name → l03 name
 
-  // For each level, collect every unique name that appears there
-  // and which parent name sits directly above them in the same row
-  const levelNames = {};
-  for (const level of SCAN_LEVELS) {
-    levelNames[level] = {}; // name → parentName
-  }
-
+  // Scan every employee row's MC Level 03 and Level 04 values
   for (const emp of Object.values(employeeMap)) {
     if (emp.isSynthetic) continue;
 
-    for (let i = 0; i < SCAN_LEVELS.length; i++) {
-      const level = SCAN_LEVELS[i];
-      const name  = (emp.managementChain[level] || '').trim();
-      if (!name) continue;
+    const l03 = (emp.managementChain[3] || '').trim();
+    const l04 = (emp.managementChain[4] || '').trim();
 
-      // Find nearest populated level above this one in the same row
-      let parentName = null;
-      for (let j = i - 1; j >= 0; j--) {
-        const pName = (emp.managementChain[SCAN_LEVELS[j]] || '').trim();
-        if (pName) { parentName = pName; break; }
-      }
-
-      // Only store first occurrence — parent relationship is consistent
-      if (!(name in levelNames[level])) {
-        levelNames[level][name] = parentName;
-      }
+    if (l03) {
+      level03Names[l03] = (level03Names[l03] || 0) + 1;
+    }
+    if (l04 && l03) {
+      // Track which L03 this L04 consistently appears with
+      level04ToL03[l04] = l03;
     }
   }
 
-  // Process top-down so parents always exist in nameMap
-  // before we try to link their children to them
-  for (const level of SCAN_LEVELS) {
-    for (const [name, parentName] of Object.entries(levelNames[level])) {
-      const normName = normalize(name);
-
-      // Only create a synthetic node if this person has no R005 row
-      if (!nameMap[normName]) {
-        const id = `SYNTHETIC_L${String(level).padStart(2, '0')}_${normName.replace(/\s+/g, '_')}`;
-        employeeMap[id] = createSyntheticNode(id, name, level);
-        nameMap[normName] = id;
-
-        // Link synthetic node to its parent immediately.
-        // Real nodes (with R005 rows) are linked by resolveManagerships().
-        if (parentName) {
-          const parentId = nameMap[normalize(parentName)];
-          if (parentId && employeeMap[parentId] && parentId !== id) {
-            employeeMap[id].parentId = parentId;
-            if (!employeeMap[parentId].children.includes(id)) {
-              employeeMap[parentId].children.push(id);
-            }
-          }
-        }
-      }
+  // Create synthetic nodes for L03 names not in R005
+  for (const name of Object.keys(level03Names)) {
+    const normName = normalize(name);
+    if (!nameMap[normName]) {
+      const id = `SYNTHETIC_L03_${normName.replace(/\s+/g, '_')}`;
+      employeeMap[id] = createSyntheticNode(id, name, 3);
+      nameMap[normName] = id;
     }
   }
-}
 
   // Create synthetic nodes for L04 names not in R005
   // and immediately link them to their L03 parent
@@ -2109,6 +2110,7 @@ function detectAndCreateRootNodes(employeeMap, nameMap) {
       }
     }
   }
+}
 
 function createSyntheticNode(id, name, managementLevel) {
   return {
@@ -2324,6 +2326,54 @@ function getTreeDepth(employeeMap, empId, currentDepth = 0) {
 // ================================================================
 
 
+// ================================================================
+// SECTION 20 — VISUAL HELPERS
+//
+// Two helper functions used by createNodeCard() to apply
+// colour coding and status badges per the visual requirements.
+//
+// getNodeColour():
+//   Maps employment type text from R005 to a hex colour.
+//   Uses normalize() + includes() so minor casing or wording
+//   differences in Workday exports still resolve correctly.
+//   Falls back to white for unknown types.
+//
+// getStatusBadge():
+//   Returns badge HTML for departing / on leave / new hire status.
+//   Priority order: Departing > On Leave > New Hire.
+//   Only one badge is shown per node at a time.
+//   Returns an empty string when no status applies.
+// ================================================================
+
+function getNodeColour(emp) {
+  if (!emp || !emp.employmentType) return '#ffffff';
+  const t = normalize(emp.employmentType);
+  if (t.includes('regular'))                                          return '#AED6F1';
+  if (t.includes('contract'))                                         return '#A9DFBF';
+  if (t.includes('student') || t.includes('co-op') || t.includes('coop')) return '#F9E79F';
+  if (t.includes('contingent') || t.includes('other'))               return '#D5D8DC';
+  return '#ffffff';
+}
+
+function getStatusBadge(emp) {
+  // Priority 1 — Departing
+  if (emp.isDeparting) {
+    const date = emp.departureDate ? ` ${formatDate(emp.departureDate)}` : '';
+    return `<div class="node-badge departing">Departing${date}</div>`;
+  }
+  // Priority 2 — On leave
+  if (emp.isOnLeave) {
+    return `<div class="node-badge on-leave">On leave</div>`;
+  }
+  // Priority 3 — New hire or pending
+  if (emp.isNewHire || emp.isPending) {
+    const date = emp.startDate ? ` ${formatDate(emp.startDate)}` : '';
+    return `<div class="node-badge new-hire">Joining${date}</div>`;
+  }
+  return '';
+}
+
+
 // ── Entry point ──────────────────────────────────────────────────
 
 /**
@@ -2451,13 +2501,15 @@ function renderNodeGroup(empId, depth) {
  * Builds and returns the HTML div for one employee node.
  *
  * Shows:
+ *   - Status badge (departing / on leave / new hire) — top-right corner
  *   - Full name
  *   - Business title
  *   - Global grade · Employment type
  *   - Headcount pill (if the node has children)
  *   - Expand/collapse chevron (if the node has children)
  *
- * Section 3 will add: colour coding, status badges, on-leave indicator.
+ * Background colour is determined by employment type via getNodeColour().
+ * Status badge is determined by priority order via getStatusBadge().
  */
 function createNodeCard(emp, depth) {
   const card = document.createElement('div');
@@ -2466,6 +2518,12 @@ function createNodeCard(emp, depth) {
 
   const hasChildren = emp.children.length > 0;
   const headcount   = hasChildren ? getHeadcount(emp.id) : 0;
+
+  // Apply employment type background colour
+  // Synthetic nodes keep their default dashed style
+  if (!emp.isSynthetic) {
+    card.style.background = getNodeColour(emp);
+  }
 
   // Mark expanded state visually
   if (STATE.expandedNodes.has(emp.id)) card.classList.add('expanded');
@@ -2477,6 +2535,7 @@ function createNodeCard(emp, depth) {
   if (hasChildren) card.classList.add('has-children');
 
   card.innerHTML = `
+    ${getStatusBadge(emp)}
     <div class="node-name" title="${emp.fullName || ''}">${emp.fullName || 'Unknown'}</div>
     <div class="node-title">${emp.businessTitle || '—'}</div>
     <div class="node-meta">${emp.globalGrade || '—'} · ${emp.employmentType || '—'}</div>
