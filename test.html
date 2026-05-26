@@ -6,11 +6,20 @@
   <title>Org Chart Tool</title>
 
   <!--
-    SheetJS — a JavaScript library that reads Excel files
-    directly inside the browser. No data leaves the machine.
-    We load it once here and it becomes available to all our code below.
+    SheetJS — reads Excel files locally in the browser.
+    Replace the CDN link with a local reference once downloaded:
+    <script src="xlsx.full.min.js"></script>
   -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!--
+    html2canvas — captures any HTML element as a pixel-perfect PNG.
+    Used for the Export PNG button on Screen 3.
+    Download and place in the same folder as this file:
+    https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
+    Then replace this line with: <script src="html2canvas.min.js"></script>
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
   <style>
     /* ─────────────────────────────────────────────────────────
@@ -813,10 +822,9 @@
       <button class="btn-secondary" onclick="resetToUpload()">
         ← Upload new file
       </button>
-      <!-- Export SVG — placeholder for Section 3 -->
-      <button class="btn-secondary" id="btn-export" disabled
-              style="opacity:0.4;cursor:not-allowed;" title="Coming in Section 3">
-        Export SVG
+      <!-- Export PNG -->
+      <button class="btn-secondary" id="btn-export" onclick="exportPNG()">
+        ↓ Export PNG
       </button>
     </div>
   </div>
@@ -2990,6 +2998,97 @@ function getHeadcount(empId) {
 }
 
 
+// ================================================================
+// SECTION 22 — PNG EXPORT
+//
+// exportPNG() uses the html2canvas library to take a screenshot
+// of the chart canvas — exactly what the user sees on screen,
+// including colour coding, badges, connector lines, and the
+// current expand/collapse state.
+//
+// HOW IT WORKS:
+//   1. html2canvas scans the #chart-canvas element
+//   2. It renders every node, colour, and connector line onto
+//      an invisible <canvas> element inside the browser
+//   3. canvas.toDataURL('image/png') converts that canvas
+//      to a base64-encoded PNG data string
+//   4. A temporary <a> element with a download attribute is
+//      created and programmatically clicked — this triggers
+//      the browser's file download without any server involved
+//   5. The temporary <a> element is immediately removed
+//
+// The export captures only #chart-canvas — no topbar, filter
+// bar, or legend chrome appears in the downloaded image.
+// Background is set to white so nodes render cleanly on save.
+//
+// FILE NAMING:
+//   org-chart-YYYY-MM-DD.png  (e.g. org-chart-2025-05-19.png)
+// ================================================================
+
+function exportPNG() {
+  const canvas  = document.getElementById('chart-canvas');
+  const btn     = document.getElementById('btn-export');
+
+  if (!canvas) return;
+
+  // Disable the button and show progress while rendering
+  btn.textContent = 'Exporting...';
+  btn.disabled    = true;
+
+  // Build today's date string for the filename: YYYY-MM-DD
+  const today    = new Date();
+  const dateStr  = today.toISOString().slice(0, 10);
+  const filename = `org-chart-${dateStr}.png`;
+
+  /*
+   * html2canvas options:
+   *   backgroundColor — sets the canvas background to white.
+   *                     Without this, transparent areas render black.
+   *   scale           — 2 doubles the resolution (retina quality).
+   *                     Higher scale = larger file but sharper image.
+   *   useCORS         — allows cross-origin images if any exist.
+   *   scrollX / scrollY — ensures the full canvas is captured,
+   *                        not just the visible viewport.
+   *   width / height  — capture the full scrollable canvas
+   *                      including parts off-screen.
+   */
+  html2canvas(canvas, {
+    backgroundColor: '#F4F5F7',
+    scale:           2,
+    useCORS:         true,
+    scrollX:         0,
+    scrollY:         0,
+    width:           canvas.scrollWidth,
+    height:          canvas.scrollHeight,
+  })
+  .then(renderedCanvas => {
+
+    // Convert the rendered canvas to a PNG data URL
+    const dataURL = renderedCanvas.toDataURL('image/png');
+
+    // Create a temporary invisible link element
+    // Setting the download attribute tells the browser to save
+    // the file rather than navigate to it
+    const link      = document.createElement('a');
+    link.href       = dataURL;
+    link.download   = filename;
+
+    // Add to DOM, click to trigger download, then remove
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+  })
+  .catch(err => {
+    console.error('PNG export failed:', err);
+    alert('Export failed. Please try again.');
+  })
+  .finally(() => {
+    // Re-enable the button regardless of success or failure
+    btn.textContent = '↓ Export PNG';
+    btn.disabled    = false;
+  });
+}
 </script>
 </body>
 </html>
