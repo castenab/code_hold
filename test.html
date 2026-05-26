@@ -3062,22 +3062,49 @@ function exportPNG() {
     height:          canvas.scrollHeight,
   })
   .then(renderedCanvas => {
-
-    // Convert the rendered canvas to a PNG data URL
     const dataURL = renderedCanvas.toDataURL('image/png');
 
-    // Create a temporary invisible link element
-    // Setting the download attribute tells the browser to save
-    // the file rather than navigate to it
-    const link      = document.createElement('a');
-    link.href       = dataURL;
-    link.download   = filename;
+    /*
+     * Convert data URL to a Blob before downloading.
+     *
+     * A data URL embeds the entire file as a base64 string in the href.
+     * Corporate browsers often block programmatic clicks on data URLs
+     * as a security measure.
+     *
+     * A Blob creates a temporary in-memory file and gives it a
+     * blob:// URL instead. This is treated as a real file by the
+     * browser and bypasses the data URL restriction.
+     *
+     * Steps:
+     *   1. Strip the header from the base64 string
+     *   2. Decode base64 back to raw bytes
+     *   3. Write bytes into an ArrayBuffer
+     *   4. Wrap the buffer in a Blob (typed as image/png)
+     *   5. Create a temporary blob:// URL
+     *   6. Click the link to trigger download
+     *   7. Revoke the blob URL to free memory
+     */
+    const base64    = dataURL.split(',')[1];
+    const bytes     = atob(base64);
+    const buffer    = new ArrayBuffer(bytes.length);
+    const byteArray = new Uint8Array(buffer);
 
-    // Add to DOM, click to trigger download, then remove
+    for (let i = 0; i < bytes.length; i++) {
+      byteArray[i] = bytes.charCodeAt(i);
+    }
+
+    const blob    = new Blob([buffer], { type: 'image/png' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const link    = document.createElement('a');
+    link.href     = blobUrl;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 
+    // Release the blob URL from memory after download starts
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
   })
   .catch(err => {
     console.error('PNG export failed:', err);
