@@ -2672,13 +2672,6 @@ function onFilterChange() {
   const searchEl = document.getElementById('filter-search');
   if (searchEl) searchEl.classList.toggle('active', searchEl.value !== '');
 
-  // When filters are active, expand all nodes so results are visible
-  if (anyActive) {
-    Object.values(STATE.employeeMap).forEach(emp => {
-      if (emp.children.length > 0) STATE.expandedNodes.add(emp.id);
-    });
-  }
-
   renderOrgChart();
 }
 
@@ -2788,7 +2781,24 @@ function renderNodeGroup(empId, depth) {
     childrenDiv.className = 'node-children';
     childrenDiv.id = `children-${empId}`;
 
-    if (!STATE.expandedNodes.has(empId)) {
+    /*
+     * Two modes for showing children:
+     *
+     * Filter mode (any filter active):
+     *   Show children automatically if any descendant matches.
+     *   The expand/collapse state is completely ignored.
+     *   This reveals matching branches without the user needing to click.
+     *
+     * Browse mode (no filter active):
+     *   Respect STATE.expandedNodes as normal.
+     *   User controls visibility by clicking nodes.
+     */
+    const anyFilterActive = Object.values(STATE.filters).some(v => v !== '');
+    const shouldShow = anyFilterActive
+      ? emp.children.some(id => subtreeHasMatch(id))
+      : STATE.expandedNodes.has(empId);
+
+    if (!shouldShow) {
       childrenDiv.classList.add('hidden');
     }
 
