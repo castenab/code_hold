@@ -3036,34 +3036,30 @@ function getHeadcount(empId) {
 
 function exportPNG() {
   const canvas  = document.getElementById('chart-canvas');
+  const svg     = document.getElementById('connector-svg');
   const btn     = document.getElementById('btn-export');
 
   if (!canvas) return;
 
-  // Disable the button and show progress while rendering
   btn.textContent = 'Exporting...';
   btn.disabled    = true;
 
-  // Build today's date string for the filename: YYYY-MM-DD
   const today    = new Date();
   const dateStr  = today.toISOString().slice(0, 10);
   const filename = `org-chart-${dateStr}.png`;
 
   /*
-   * html2canvas options:
-   *   backgroundColor — sets the canvas background to white.
-   *                     Without this, transparent areas render black.
-   *   scale           — 2 doubles the resolution (retina quality).
-   *                     Higher scale = larger file but sharper image.
-   *   useCORS         — allows cross-origin images if any exist.
-   *   scrollX / scrollY — ensures the full canvas is captured,
-   *                        not just the visible viewport.
-   *   width / height  — capture the full scrollable canvas
-   *                      including parts off-screen.
+   * The connector SVG uses overflow:visible so lines can extend past
+   * its declared bounds. html2canvas includes that overflow content
+   * when calculating the capture area, which produces invalid canvas
+   * dimensions and causes toBlob() to return null.
+   * Clamping to overflow:hidden for the duration of the capture fixes this.
    */
+  if (svg) svg.style.overflow = 'hidden';
+
   html2canvas(canvas, {
     backgroundColor: '#F4F5F7',
-    scale:           2,
+    scale:           1,
     useCORS:         true,
     scrollX:         0,
     scrollY:         0,
@@ -3071,15 +3067,11 @@ function exportPNG() {
     height:          canvas.scrollHeight,
   })
   .then(renderedCanvas => {
-    /*
-     * toBlob() encodes the canvas as PNG internally and hands back
-     * a ready-made Blob — no manual base64 decoding needed.
-     * The blob:// URL it produces is treated as a real file by
-     * corporate browsers (unlike a raw data: URL, which many block).
-     */
+    if (svg) svg.style.overflow = '';
+
     renderedCanvas.toBlob(blob => {
       if (!blob) {
-        alert('Export failed — the chart may be too large. Try collapsing some teams and exporting again.');
+        alert('Export failed — could not generate image data. Please try again.');
         btn.textContent = '↓ Export PNG';
         btn.disabled    = false;
         return;
@@ -3101,6 +3093,7 @@ function exportPNG() {
     }, 'image/png');
   })
   .catch(err => {
+    if (svg) svg.style.overflow = '';
     console.error('PNG export failed:', err);
     alert('Export failed. Please try again.');
     btn.textContent = '↓ Export PNG';
