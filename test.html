@@ -2952,7 +2952,7 @@ function drawConnectors() {
     if (!childrenDiv || childrenDiv.classList.contains('hidden')) continue;
 
     // Find the parent card's centre-bottom position
-    const parentCard = canvas.querySelector(`.node-card[data-id="${empId}"]`);
+    const parentCard = canvas.querySelector(`.node-card[data-id="${emp.id}"]`);
     if (!parentCard) continue;
 
     const parentRect = parentCard.getBoundingClientRect();
