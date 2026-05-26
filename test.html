@@ -558,6 +558,79 @@
       color:      #172B4D;
       border: 1.5px dashed #aaa;
     }
+
+    /* ── Filter bar ────────────────────────────────────────────── */
+    /*
+      The filter bar sits between the topbar and the chart area.
+      display:flex lays all controls out in a horizontal row.
+      flex-wrap:wrap lets them stack on narrow screens.
+    */
+    .filter-bar {
+      background: #fff;
+      border-bottom: 1px solid #E1E4E8;
+      padding: 8px 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .filter-label {
+      font-size: 11px;
+      color: #97A0AF;
+      white-space: nowrap;
+      margin-right: 4px;
+    }
+    .filter-select {
+      font-size: 12px;
+      padding: 5px 10px;
+      border: 1px solid #DFE1E6;
+      border-radius: 6px;
+      background: #fff;
+      color: #172B4D;
+      cursor: pointer;
+      max-width: 180px;
+    }
+    .filter-select:focus {
+      outline: none;
+      border-color: #0052CC;
+    }
+    /* Active state — border turns blue when a value is selected */
+    .filter-select.active {
+      border-color: #0052CC;
+      background: #F0F4FF;
+      color: #0052CC;
+      font-weight: 500;
+    }
+    /*
+      The search input is wider than the dropdowns.
+      It sits inline in the same bar.
+    */
+    .filter-search {
+      font-size: 12px;
+      padding: 5px 10px;
+      border: 1px solid #DFE1E6;
+      border-radius: 6px;
+      background: #fff;
+      color: #172B4D;
+      width: 200px;
+    }
+    .filter-search:focus {
+      outline: none;
+      border-color: #0052CC;
+    }
+    .filter-search.active {
+      border-color: #0052CC;
+      background: #F0F4FF;
+    }
+    /* Clear button — only visible when at least one filter is active */
+    .filter-clear {
+      font-size: 11px;
+      padding: 5px 12px;
+      margin-left: auto;
+      display: none;
+    }
+    .filter-clear.visible { display: block; }
   </style>
 </head>
 <body>
@@ -746,6 +819,45 @@
         Export SVG
       </button>
     </div>
+  </div>
+
+  <!--
+    FILTER BAR
+    Four dropdowns + one search input.
+    Dropdowns are populated dynamically by buildFilterOptions()
+    after the hierarchy is built — they always reflect the actual data.
+    The Clear button only appears when at least one filter is active.
+  -->
+  <div class="filter-bar" id="filter-bar">
+    <span class="filter-label">Filter by</span>
+
+    <select class="filter-select" id="filter-l4" onchange="onFilterChange()">
+      <option value="">L4: All</option>
+    </select>
+
+    <select class="filter-select" id="filter-l5" onchange="onFilterChange()">
+      <option value="">L5: All</option>
+    </select>
+
+    <select class="filter-select" id="filter-employment" onchange="onFilterChange()">
+      <option value="">Employment type: All</option>
+    </select>
+
+    <select class="filter-select" id="filter-grade" onchange="onFilterChange()">
+      <option value="">Grade: All</option>
+    </select>
+
+    <input
+      type="text"
+      class="filter-search"
+      id="filter-search"
+      placeholder="Search name, title, grade..."
+      oninput="onFilterChange()"
+    />
+
+    <button class="btn-secondary filter-clear" id="filter-clear-btn" onclick="clearFilters()">
+      ✕ Clear filters
+    </button>
   </div>
 
   <!--
@@ -1092,6 +1204,17 @@ const STATE = {
   // Section 2b — chart rendering state
   expandedNodes:   new Set(), // tracks which node IDs are currently expanded
   hintDismissed:   false,     // whether the first-load hint has been dismissed
+
+  // Section 3 — filter state
+  // Each key holds the currently selected filter value.
+  // Empty string means no filter applied for that field.
+  filters: {
+    l4:             '',
+    l5:             '',
+    employmentType: '',
+    globalGrade:    '',
+    search:         '',
+  },
 };
 
 
@@ -2379,27 +2502,196 @@ function getStatusBadge(emp) {
 /**
  * showOrgChart()
  * Called by buildOrgData() after the hierarchy is ready.
- * Switches to Screen 3 and triggers the first render.
+ * Switches to Screen 3, populates filters, triggers first render.
  */
 function showOrgChart() {
-  // Set the as-of date in the topbar
   const today = new Date().toLocaleDateString('en-US', {
     month: 'long', day: 'numeric', year: 'numeric'
   });
   const dateEl = document.getElementById('chart-date');
   if (dateEl) dateEl.textContent = `· As of ${today}`;
 
-  // Show Screen 3
-  showScreen('screen-chart');
+  // Populate filter dropdowns from the actual data
+  buildFilterOptions();
 
-  // Render the tree
+  showScreen('screen-chart');
   renderOrgChart();
 
-  // Show the first-load hint
   if (!STATE.hintDismissed) {
     const hint = document.getElementById('chart-hint');
     if (hint) hint.style.display = 'flex';
   }
+}
+
+
+// ================================================================
+// SECTION 21 — FILTERS & SEARCH
+//
+// buildFilterOptions():
+//   Reads unique values from STATE.employeeMap and populates
+//   the four filter dropdowns. Always reflects the actual data
+//   so no values are hardcoded.
+//
+// nodeMatchesFilters(emp):
+//   Returns true if an employee passes all active filters.
+//   Each filter only applies when its value is non-empty.
+//   Search checks name, business title, and global grade.
+//
+// subtreeHasMatch(empId):
+//   Recursively checks if any descendant of a node matches.
+//   Used to keep parent nodes visible when their children match
+//   a filter — even if the parent itself doesn't match.
+//
+// onFilterChange():
+//   Called by every filter control on change/input.
+//   Reads current DOM values into STATE.filters,
+//   updates the Clear button visibility,
+//   marks active dropdowns with a blue border,
+//   then re-renders the chart.
+//
+// clearFilters():
+//   Resets all filter values and re-renders.
+// ================================================================
+
+/**
+ * buildFilterOptions()
+ * Scans employeeMap and populates dropdowns with sorted unique values.
+ * Only called once per file upload.
+ */
+function buildFilterOptions() {
+  // Collect unique values for each filter
+  const l4Set    = new Set();
+  const l5Set    = new Set();
+  const typeSet  = new Set();
+  const gradeSet = new Set();
+
+  for (const emp of Object.values(STATE.employeeMap)) {
+    if (emp.isSynthetic) continue;
+    if (emp.managementChain && emp.managementChain[4]) l4Set.add(emp.managementChain[4]);
+    if (emp.managementChain && emp.managementChain[5]) l5Set.add(emp.managementChain[5]);
+    if (emp.employmentType) typeSet.add(emp.employmentType);
+    if (emp.globalGrade)    gradeSet.add(emp.globalGrade);
+  }
+
+  // Helper — populates one dropdown with sorted options
+  function populateSelect(id, values, allLabel) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = `<option value="">${allLabel}</option>`;
+    [...values].sort().forEach(val => {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = val;
+      el.appendChild(opt);
+    });
+  }
+
+  populateSelect('filter-l4',         l4Set,    'L4: All');
+  populateSelect('filter-l5',         l5Set,    'L5: All');
+  populateSelect('filter-employment', typeSet,  'Employment type: All');
+  populateSelect('filter-grade',      gradeSet, 'Grade: All');
+}
+
+/**
+ * nodeMatchesFilters(emp)
+ * Returns true if the employee passes all currently active filters.
+ * Each condition is only checked when that filter has a value.
+ */
+function nodeMatchesFilters(emp) {
+  const f = STATE.filters;
+
+  // If nothing is active everything matches
+  if (!f.l4 && !f.l5 && !f.employmentType && !f.globalGrade && !f.search) return true;
+
+  // L4 — check the employee's MC Level 4 value
+  if (f.l4 && (!emp.managementChain || emp.managementChain[4] !== f.l4)) return false;
+
+  // L5 — check the employee's MC Level 5 value
+  if (f.l5 && (!emp.managementChain || emp.managementChain[5] !== f.l5)) return false;
+
+  // Employment type — exact match after normalisation
+  if (f.employmentType && normalize(emp.employmentType) !== normalize(f.employmentType)) return false;
+
+  // Global grade — exact match after normalisation
+  if (f.globalGrade && normalize(emp.globalGrade) !== normalize(f.globalGrade)) return false;
+
+  // Search — checks name, title, and grade
+  if (f.search) {
+    const term     = normalize(f.search);
+    const haystack = normalize(`${emp.fullName || ''} ${emp.businessTitle || ''} ${emp.globalGrade || ''}`);
+    if (!haystack.includes(term)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * subtreeHasMatch(empId)
+ * Recursively checks whether this node OR any of its descendants
+ * matches the active filters.
+ * Used to decide whether to keep a parent node visible.
+ */
+function subtreeHasMatch(empId) {
+  const emp = STATE.employeeMap[empId];
+  if (!emp) return false;
+  if (nodeMatchesFilters(emp)) return true;
+  return emp.children.some(childId => subtreeHasMatch(childId));
+}
+
+/**
+ * onFilterChange()
+ * Fired whenever any filter control changes.
+ * Reads DOM values into STATE.filters and re-renders.
+ */
+function onFilterChange() {
+  STATE.filters.l4             = document.getElementById('filter-l4').value;
+  STATE.filters.l5             = document.getElementById('filter-l5').value;
+  STATE.filters.employmentType = document.getElementById('filter-employment').value;
+  STATE.filters.globalGrade    = document.getElementById('filter-grade').value;
+  STATE.filters.search         = document.getElementById('filter-search').value;
+
+  const anyActive = Object.values(STATE.filters).some(v => v !== '');
+
+  // Show / hide the Clear button
+  const clearBtn = document.getElementById('filter-clear-btn');
+  if (clearBtn) clearBtn.classList.toggle('visible', anyActive);
+
+  // Mark active dropdowns with a blue border
+  ['filter-l4', 'filter-l5', 'filter-employment', 'filter-grade'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', el.value !== '');
+  });
+  const searchEl = document.getElementById('filter-search');
+  if (searchEl) searchEl.classList.toggle('active', searchEl.value !== '');
+
+  // When filters are active, expand all nodes so results are visible
+  if (anyActive) {
+    Object.values(STATE.employeeMap).forEach(emp => {
+      if (emp.children.length > 0) STATE.expandedNodes.add(emp.id);
+    });
+  }
+
+  renderOrgChart();
+}
+
+/**
+ * clearFilters()
+ * Resets all filter values, clears UI controls, re-renders.
+ */
+function clearFilters() {
+  STATE.filters = { l4: '', l5: '', employmentType: '', globalGrade: '', search: '' };
+
+  ['filter-l4', 'filter-l5', 'filter-employment', 'filter-grade'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.classList.remove('active'); }
+  });
+  const searchEl = document.getElementById('filter-search');
+  if (searchEl) { searchEl.value = ''; searchEl.classList.remove('active'); }
+
+  const clearBtn = document.getElementById('filter-clear-btn');
+  if (clearBtn) clearBtn.classList.remove('visible');
+
+  renderOrgChart();
 }
 
 
@@ -2463,6 +2755,18 @@ function renderNodeGroup(empId, depth) {
   const emp = STATE.employeeMap[empId];
   if (!emp) return document.createDocumentFragment();
 
+  // ── Filter check ─────────────────────────────────────────
+  // If filters are active, skip nodes where neither this node
+  // nor any of its descendants match.
+  const anyFilterActive = Object.values(STATE.filters).some(v => v !== '');
+  if (anyFilterActive) {
+    const selfMatches            = nodeMatchesFilters(emp);
+    const hasMatchingDescendant  = emp.children.some(id => subtreeHasMatch(id));
+    if (!selfMatches && !hasMatchingDescendant) {
+      return document.createDocumentFragment(); // renders nothing
+    }
+  }
+
   const group = document.createElement('div');
   group.className = 'node-group';
   group.dataset.id = empId;
@@ -2476,12 +2780,10 @@ function renderNodeGroup(empId, depth) {
     childrenDiv.className = 'node-children';
     childrenDiv.id = `children-${empId}`;
 
-    // Hide by default; unhide if this node is in expandedNodes
     if (!STATE.expandedNodes.has(empId)) {
       childrenDiv.classList.add('hidden');
     }
 
-    // Row of child nodes
     const childLevel = document.createElement('div');
     childLevel.className = 'tree-level';
 
