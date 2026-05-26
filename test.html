@@ -3049,22 +3049,44 @@ function exportPNG() {
   const filename = `org-chart-${dateStr}.png`;
 
   /*
-   * The connector SVG uses overflow:visible so lines can extend past
-   * its declared bounds. html2canvas includes that overflow content
-   * when calculating the capture area, which produces invalid canvas
-   * dimensions and causes toBlob() to return null.
-   * Clamping to overflow:hidden for the duration of the capture fixes this.
+   * Compute a tight bounding box around all visible node cards.
+   * offsetLeft / offsetTop give each card's position relative to
+   * #chart-canvas (its nearest positioned ancestor), so the result
+   * is independent of scroll position and viewport size.
    */
+  const cards = canvas.querySelectorAll('.node-card');
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  cards.forEach(card => {
+    minX = Math.min(minX, card.offsetLeft);
+    minY = Math.min(minY, card.offsetTop);
+    maxX = Math.max(maxX, card.offsetLeft + card.offsetWidth);
+    maxY = Math.max(maxY, card.offsetTop + card.offsetHeight);
+  });
+
+  if (!cards.length || minX === Infinity) {
+    alert('No chart content to export.');
+    btn.textContent = '↓ Export PNG';
+    btn.disabled    = false;
+    return;
+  }
+
+  const pad      = 24; // breathing room so badges and connector lines aren't clipped
+  const captureX = Math.max(0, minX - pad);
+  const captureY = Math.max(0, minY - pad);
+  const captureW = maxX - minX + pad * 2;
+  const captureH = maxY - minY + pad * 2;
+
+  // Clamp SVG overflow so html2canvas doesn't expand its measured dimensions
   if (svg) svg.style.overflow = 'hidden';
 
   html2canvas(canvas, {
     backgroundColor: '#F4F5F7',
     scale:           1,
     useCORS:         true,
-    scrollX:         0,
-    scrollY:         0,
-    width:           canvas.scrollWidth,
-    height:          canvas.scrollHeight,
+    x:               captureX,
+    y:               captureY,
+    width:           captureW,
+    height:          captureH,
   })
   .then(renderedCanvas => {
     if (svg) svg.style.overflow = '';
@@ -3082,8 +3104,8 @@ function exportPNG() {
       const link    = document.createElement('a');
       link.href     = blobUrl;
       link.download = filename;
-      document.body.appendChild(link);
-      link.click();
+      document.body.appendChild(link); 
+      link.click()
       document.body.removeChild(link);
 
       setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
