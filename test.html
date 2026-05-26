@@ -2945,11 +2945,10 @@ function drawConnectors() {
 
   const canvasRect = canvas.getBoundingClientRect();
 
-  for (const empId of STATE.expandedNodes) {
-    const emp = STATE.employeeMap[empId];
-    if (!emp || emp.children.length === 0) continue;
+  for (const emp of Object.values(STATE.employeeMap)) {
+    if (emp.children.length === 0) continue;
 
-    const childrenDiv = document.getElementById(`children-${empId}`);
+    const childrenDiv = document.getElementById(`children-${emp.id}`);
     if (!childrenDiv || childrenDiv.classList.contains('hidden')) continue;
 
     // Find the parent card's centre-bottom position
