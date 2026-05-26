@@ -1,0 +1,156 @@
+Org Chart Tool 
+
+Problem: The team reviews employee data with VPs to understand their respective organization. This data is currently stored within excels which presents challenges when visualizing organizational structure. Due to the size of this data, it is difficult to manual create each one. 
+The goal is to has this solution ingest the excel file and generate a organizational chart. This tool will be used within a corporate environment 
+
+
+I will provide the meta data and other usability requirements later. But here are the current technical requirements due to company & team constraints: 
+1. No data should be sent to external data and must be 100% locally rendered 
+2. No tools should be used the upload data to the cloud (e.g Mermaid) 
+3. The team is not technical. Using an IDE and maintaining code would present challenges like knowledge transfer 
+
+
+
+Audience: VPs, Intent: Enable employee organization planning & budgeting discussions 
+
+REQUIREMENTS
+Input & Output
+1. The solution must read from an input excel file extracted from workday 
+2. The solution must allow users to upload a new Excel file at any time, replacing the previous data. 
+3. The solution must dynamically read excel columns and worksheets based off title headers 
+4. The solution must have an .SVG export capability based off the filters and expanded/collapsed team 
+5. To determine an employee's direct manager, the tool must first refer to Worker's Manager, then Manager Level 02, then Management Chain Level 01–10 to fill remaining gaps upward
+
+Visual Design 
+1. The HTML file must enable users to upload excel file directly via UI 
+2. The HTML file must have interactive zoom controls, filters, expand/collapse teams and see headcount totals 
+3. The diagram must have employees colour coded based off their employment type:
+    1. Regular = light blue (#AED6F1) 
+    2. Contract = light green (#A9DFBF) 
+    3. Student/coop = light yellow (#F9E79F)
+    4. Contingent/Other = grey (#D5D8DC) 
+    5. Show as a badge on the node: 
+        1. On leave employees = light orange (#FAD7A0) 
+        2. New hire: neutral white badge + start date
+        3. Departing: red badge + departing date  
+4. Each node must display Name, Business Title, Global|Employee Type 
+5. The diagram must identify a newly hired employee along with hire date 
+6. The tree layout must follow a top-down hierarchy, with the manager at the top & their direct-report below 
+7. Filters based off Management Level 04 & Management Level 05, employment type and Global Grade 
+
+Org Chart Layout:
+1. On load, the org chart must render the VP node at the top with all L5 direct reports displayed as collapsed team cards beneath them in a single wrapped row
+2. Each collapsed team card must display: direct report name, business title, employment type color, headcount, and any active status badges (departing, on leave, new hire)
+3. All L5 sub-trees must be collapsed by default — individual team members are hidden until the user expands a team
+4. A user must be able to expand and collapse any team card independently by clicking it — multiple teams may be expanded simultaneously
+5. When a team card is expanded, the sub-tree renders beneath that card in a top-down hierarchy following the same expand/collapse behaviour recursively for nested managers
+6. Expanding or collapsing a team must not affect the state of any other expanded teams
+7. The PNG export must capture the current state of the chart — only nodes that are expanded at the time of export are included in the output
+8. If a VP has more direct reports than fit in a single row, the team cards must wrap to a second row rather than overflow horizontally
+9. An inline hint must be displayed below the direct report row on first load stating: "Click any team card to expand their sub-tree" — this hint dismisses after the first interaction
+
+
+Summary Table 
+1. The solution should product a summary snapshot of the data, including: 
+2. Org snapshot: 
+    1. "The summary table must be scoped to employees tagged under Management Chain Level 04 and Level 05. The org snapshot must display the L4 and L5 names, total headcount of employees beneath them, and today's date as the as-of reference point."
+    2. Headcount by employment type: count + % of total 
+    3. Headcount by directly report - each direct report and their team size 
+3. What’s Changing:
+    1. Net change line: Joining, leaving, days a job req is in open status + reason for vacancy 
+    2. Bucketed by 30, 90, 90+ days - forward looking dates
+    3. Each entry: name, title, grade, team, date 
+4. Open positions: 
+    1. Total open reqs 
+    2. Breakdown by team 
+    3. Breakdown by grade 
+    4. Flag: 3+ open reqs in 1 team 
+    5. Flag: Open req where hiring manager is also departing 
+5. Notes & Flags 
+    1. Employees with comments: name, title & team 
+    2. High contractor concentration: any team exceeding 30% 
+    3. Team has departure with no open reqs 
+    4. Incoming new hire whose manager is departing 
+* The summary table must update dynamically in response to the L4/L5 filter selection on the org chart. When a user filters to a specific L4 or L5, all summary table sections — Org Snapshot, What's Changing, Open Positions, and Notes & Flags — must recalculate and reflect only the employees, hires, departures, and open reqs scoped to that selection. When no filter is applied, the summary table displays the full population from the uploaded file."
+
+Cross Report Analysis: 
+1. Each report (R005, New Hire, Departures, Open Reqs) must be analyzed independently for its own summary section
+2. Cross-report matching must only occur where a flag explicitly requires a relationship between two reports:
+    * Flag: Open req where hiring manager is also departing — match Open Reqs "Hiring Manager" against Departures "Resource Name"
+    * Flag: Team has departure with no open reqs — match Departures "L4/L5" against Open Reqs "L4/L5"
+    * Flag: Incoming new hire whose manager is departing — match New Hire "L5" against Departures "L5"
+3. All cross-report name matching must use normalized comparison: trim whitespace and convert to lowercase before comparing
+4. Where a cross-report match cannot be resolved, the tool must surface a warning in the Notes & Flags section stating: "Could not verify [field] — manual check recommended" rather than silently failing or suppressing the flag
+5. Employee ID must be used as the join key when cross-referencing R005 against New Hire or Departures. Name-based matching must only be used when Employee ID is unavailable in both reports being compared (e.g. Hiring Manager in Open Reqs)
+
+
+Privacy & Security 
+1. No data should be sent to external servers and be 100% locally rendered 
+2. No tools should be used that upload data to the cloud (e.g rule out: Mermaid, app.diagrams.net) 
+
+
+
+
+DATA STRUCTURE
+
+R005 Report (Employee List) 
+1. First name 
+2. Last name 
+3. Employee ID 
+4. Business Title (Description: Job title) 
+5. Work location - country 
+6. On leave as of effective (Description: Is the employee on leave of absence) 
+7. Worker’s manager 
+8. Manager level 02 (Description: The manager of the employee’s manager) 
+9. Global Grade (Description: Employee’s seniority level) 
+10. Columns ranging from Management Chain - Level 01 to Management Chain - Level 10 (Description: Organizational Hierarchy)
+11. Comments: This column is not directly generated from Workday but rather a net new columns a user may add for additional context AFTERWARDS 
+12. Employment type
+
+New Hire 
+1. L4: Organizational hierarchy (i.e Management Chain - level 04) 
+2. L5: Organizational hierarchy (i.e Management Chain - level 05)
+3. Position Level: Seniority Level (i.e Global Grade - GG Level) 
+4. Job title: I.e Business title 
+5. Resource name: Employee name (i.e Display name) 
+6. Employee ID 
+7. Start date 
+
+Departures 
+1. L4: Organizational hierarchy (i.e Management Chain - level 04) 
+2. L5: Organizational hierarchy (i.e Management Chain - level 05)
+3. Position Level: Seniority Level (i.e Global Grade - GG Level) 
+4. Job title: I.e Business title 
+5. Resource name: Employee name (i.e Display name) 
+6. Employee ID 
+7. Departure date 
+
+Open Reqs 
+1. L4: Organizational hierarchy (i.e Management Chain - level 04) 
+2. L5: Organizational hierarchy (i.e Management Chain - level 05)
+3. Hiring Manager 
+4. Position Level: Seniority Level (i.e Global Grade - GG Level) 
+5. Job title: I.e Business title 
+6. Current status (Interviewing, recruiting) 
+7. Reason for vacancy
+8. Person being replaced (if applicable) 
+9. Location 
+10. Days in Open status
+
+
+
+
+Now we can discuss building. I would like to do this in sections as I will type this out separately. I'd like to understand the code being generated. These are the sections I'm thinking:
+
+
+
+
+
+
+
+
+
+
+
+
+

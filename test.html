@@ -3071,56 +3071,38 @@ function exportPNG() {
     height:          canvas.scrollHeight,
   })
   .then(renderedCanvas => {
-    const dataURL = renderedCanvas.toDataURL('image/png');
-
     /*
-     * Convert data URL to a Blob before downloading.
-     *
-     * A data URL embeds the entire file as a base64 string in the href.
-     * Corporate browsers often block programmatic clicks on data URLs
-     * as a security measure.
-     *
-     * A Blob creates a temporary in-memory file and gives it a
-     * blob:// URL instead. This is treated as a real file by the
-     * browser and bypasses the data URL restriction.
-     *
-     * Steps:
-     *   1. Strip the header from the base64 string
-     *   2. Decode base64 back to raw bytes
-     *   3. Write bytes into an ArrayBuffer
-     *   4. Wrap the buffer in a Blob (typed as image/png)
-     *   5. Create a temporary blob:// URL
-     *   6. Click the link to trigger download
-     *   7. Revoke the blob URL to free memory
+     * toBlob() encodes the canvas as PNG internally and hands back
+     * a ready-made Blob — no manual base64 decoding needed.
+     * The blob:// URL it produces is treated as a real file by
+     * corporate browsers (unlike a raw data: URL, which many block).
      */
-    const base64    = dataURL.split(',')[1];
-    const bytes     = atob(base64);
-    const buffer    = new ArrayBuffer(bytes.length);
-    const byteArray = new Uint8Array(buffer);
+    renderedCanvas.toBlob(blob => {
+      if (!blob) {
+        alert('Export failed — the chart may be too large. Try collapsing some teams and exporting again.');
+        btn.textContent = '↓ Export PNG';
+        btn.disabled    = false;
+        return;
+      }
 
-    for (let i = 0; i < bytes.length; i++) {
-      byteArray[i] = bytes.charCodeAt(i);
-    }
+      const blobUrl = URL.createObjectURL(blob);
 
-    const blob    = new Blob([buffer], { type: 'image/png' });
-    const blobUrl = URL.createObjectURL(blob);
+      const link    = document.createElement('a');
+      link.href     = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-    const link    = document.createElement('a');
-    link.href     = blobUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
 
-    // Release the blob URL from memory after download starts
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+      btn.textContent = '↓ Export PNG';
+      btn.disabled    = false;
+    }, 'image/png');
   })
   .catch(err => {
     console.error('PNG export failed:', err);
     alert('Export failed. Please try again.');
-  })
-  .finally(() => {
-    // Re-enable the button regardless of success or failure
     btn.textContent = '↓ Export PNG';
     btn.disabled    = false;
   });
