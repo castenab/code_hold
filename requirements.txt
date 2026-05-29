@@ -37,6 +37,8 @@ Visual Design
 5. The diagram must identify a newly hired employee along with hire date 
 6. The tree layout must follow a top-down hierarchy, with the manager at the top & their direct-report below 
 7. Filters based off Management Level 04 & Management Level 05, employment type and Global Grade 
+8. There must be interactive controls to allow users to increase or decrease zoom levels 
+9. The tool must have a button to re-center the tree after scrolling  
 
 Org Chart Layout:
 1. On load, the org chart must render the VP node at the top with all L5 direct reports displayed as collapsed team cards beneath them in a single wrapped row

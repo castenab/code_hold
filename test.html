@@ -742,6 +742,46 @@
 
     .sum-note-detail { font-size:10px; color:#6B778C; padding:1px 0 1px 10px; }
     .sum-empty       { font-size:11px; color:#97A0AF; font-style:italic; padding:4px 0; }
+
+    /* ─────────────────────────────────────────────────────────
+       ZOOM CONTROLS — compact +/− group in the topbar
+    ───────────────────────────────────────────────────────── */
+    .zoom-control {
+      display: flex;
+      align-items: center;
+      gap: 1px;
+      border: 1px solid #DFE1E6;
+      border-radius: 6px;
+      padding: 2px 3px;
+      background: #fff;
+    }
+    .zoom-btn {
+      background: none;
+      border: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 400;
+      color: #6B778C;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      padding: 0;
+    }
+    .zoom-btn:hover:not(:disabled) { background: #F4F5F7; color: #172B4D; }
+    .zoom-btn:disabled { color: #C1C7D0; cursor: not-allowed; }
+    .zoom-label {
+      font-size: 11px;
+      color: #172B4D;
+      font-weight: 500;
+      min-width: 34px;
+      text-align: center;
+      cursor: default;
+    }
+    .zoom-label:hover { text-decoration: underline; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -920,10 +960,16 @@
       Org Chart Tool
       <span class="chart-topbar-meta" id="chart-date"></span>
     </div>
-    <div style="display:flex;gap:8px;">
+    <div style="display:flex;gap:8px;align-items:center;">
       <button class="btn-secondary" onclick="resetToUpload()">
         ← Upload new file
       </button>
+      <!-- Zoom controls -->
+      <div class="zoom-control">
+        <button class="zoom-btn" id="zoom-out-btn" onclick="zoomOut()" title="Zoom out">−</button>
+        <span class="zoom-label" id="zoom-level" onclick="resetZoom()" title="Click to reset zoom">100%</span>
+        <button class="zoom-btn" id="zoom-in-btn" onclick="zoomIn()" title="Zoom in">+</button>
+      </div>
       <!-- Export PNG -->
       <button class="btn-secondary" id="btn-export" onclick="exportPNG()">
         ↓ Export PNG
@@ -1306,6 +1352,7 @@ const STATE = {
   // Section 2b — chart rendering state
   expandedNodes:   new Set(), // tracks which node IDs are currently expanded
   hintDismissed:   false,     // whether the first-load hint has been dismissed
+  zoom:            1.0,       // current zoom level (0.25 – 2.0)
 
   // Section 3 — filter state
   // Each key holds the currently selected filter value.
@@ -3093,6 +3140,53 @@ function drawConnectors() {
 window.addEventListener('resize', () => {
   requestAnimationFrame(drawConnectors);
 });
+
+
+// ================================================================
+// ZOOM CONTROLS
+//
+// Uses the CSS `zoom` property on #chart-canvas.
+// CSS zoom (unlike transform: scale) is layout-aware: the element's
+// reported dimensions and scroll area update to match the visual size,
+// so scrollbars stay correct and drawConnectors() needs no adjustment.
+//
+// Range: 25% – 200%, step 10%.
+// Clicking the percentage label resets to 100%.
+// ================================================================
+
+const ZOOM_MIN  = 0.25;
+const ZOOM_MAX  = 2.0;
+const ZOOM_STEP = 0.10;
+
+function zoomIn() {
+  STATE.zoom = Math.min(ZOOM_MAX, parseFloat((STATE.zoom + ZOOM_STEP).toFixed(2)));
+  applyZoom();
+}
+
+function zoomOut() {
+  STATE.zoom = Math.max(ZOOM_MIN, parseFloat((STATE.zoom - ZOOM_STEP).toFixed(2)));
+  applyZoom();
+}
+
+function resetZoom() {
+  STATE.zoom = 1.0;
+  applyZoom();
+}
+
+function applyZoom() {
+  const canvas = document.getElementById('chart-canvas');
+  if (canvas) canvas.style.zoom = STATE.zoom;
+
+  const label  = document.getElementById('zoom-level');
+  if (label)  label.textContent = Math.round(STATE.zoom * 100) + '%';
+
+  const btnIn  = document.getElementById('zoom-in-btn');
+  const btnOut = document.getElementById('zoom-out-btn');
+  if (btnIn)  btnIn.disabled  = STATE.zoom >= ZOOM_MAX;
+  if (btnOut) btnOut.disabled = STATE.zoom <= ZOOM_MIN;
+
+  requestAnimationFrame(drawConnectors);
+}
 
 
 // ================================================================
