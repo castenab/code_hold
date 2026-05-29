@@ -632,6 +632,22 @@
       border-color: #0052CC;
       background: #F0F4FF;
     }
+    /* Comment text — shown on nodes that have a Comments column value */
+    .node-comment {
+      font-size: 10px;
+      color: #5E6C84;
+      font-style: italic;
+      margin-top: 5px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(0,0,0,0.08);
+      line-height: 1.4;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      cursor: help;
+    }
+
     /* Clear button — only visible when at least one filter is active */
     .filter-clear {
       font-size: 11px;
@@ -2854,11 +2870,16 @@ function createNodeCard(emp, depth) {
   // Clickable only if the node has children
   if (hasChildren) card.classList.add('has-children');
 
+  const commentHtml = emp.comments
+    ? `<div class="node-comment" title="${emp.comments.replace(/"/g, '&quot;')}">${emp.comments}</div>`
+    : '';
+
   card.innerHTML = `
     ${getStatusBadge(emp)}
     <div class="node-name" title="${emp.fullName || ''}">${emp.fullName || 'Unknown'}</div>
     <div class="node-title">${emp.businessTitle || '—'}</div>
     <div class="node-meta">${emp.globalGrade || '—'} · ${emp.employmentType || '—'}</div>
+    ${commentHtml}
     ${hasChildren
       ? `<div class="node-hc">${headcount} ${headcount === 1 ? 'person' : 'people'}</div>
          <div class="node-expand-icon">▾</div>`

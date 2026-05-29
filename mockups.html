@@ -1,0 +1,167 @@
+
+<style>
+.lf{font-family:var(--font-sans);padding:1rem 0}
+.screen{background:var(--color-background-secondary);border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-tertiary);overflow:hidden}
+.screen-label{font-size:11px;font-weight:500;color:var(--color-text-tertiary);letter-spacing:.06em;text-transform:uppercase;margin:0 0 6px;padding:0 2px}
+.topbar{background:var(--color-background-primary);border-bottom:0.5px solid var(--color-border-tertiary);padding:8px 12px;display:flex;align-items:center;justify-content:space-between}
+.t-title{font-size:12px;font-weight:500;color:var(--color-text-primary);display:flex;align-items:center;gap:6px}
+.t-meta{font-size:10px;color:var(--color-text-tertiary)}
+.t-actions{display:flex;gap:5px}
+.btn-s{font-size:11px;padding:3px 9px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-primary);color:var(--color-text-secondary);display:flex;align-items:center;gap:3px}
+.filterbar{background:var(--color-background-primary);border-bottom:0.5px solid var(--color-border-tertiary);padding:6px 12px;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.fsel{font-size:10px;padding:3px 7px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-primary);color:var(--color-text-secondary)}
+.fsearch{font-size:10px;padding:3px 8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-primary);color:var(--color-text-tertiary);width:130px}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 200px;min-height:360px}
+.chart-area{padding:10px;border-right:0.5px solid var(--color-border-tertiary)}
+.node{border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:6px 9px;min-width:90px;font-size:10px;position:relative;background:var(--color-background-primary)}
+.n-name{font-weight:500;font-size:11px;color:var(--color-text-primary);margin-bottom:1px}
+.n-title{color:var(--color-text-secondary);font-size:9px;line-height:1.3;margin-bottom:2px}
+.n-meta{color:var(--color-text-tertiary);font-size:9px}
+.hc{display:inline-block;font-size:9px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:1px 5px;margin-top:2px}
+.badge{position:absolute;top:-7px;right:3px;font-size:8px;padding:1px 5px;border-radius:8px;font-weight:500;white-space:nowrap}
+.tree{display:flex;flex-direction:column;align-items:center}
+.cv{width:1px;height:12px;background:var(--color-border-secondary);margin:0 auto}
+.row{display:flex;gap:8px;justify-content:center}
+.summary{padding:10px;background:var(--color-background-primary)}
+.sec{margin-bottom:10px}
+.sec-h{font-size:11px;font-weight:500;color:var(--color-text-primary);padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:5px}
+.stat{display:flex;justify-content:space-between;padding:2px 0;font-size:11px;color:var(--color-text-secondary)}
+.flag{background:var(--color-background-danger);border-radius:var(--border-radius-md);padding:3px 7px;font-size:10px;color:var(--color-text-danger);margin-bottom:3px;display:flex;align-items:center;gap:3px}
+.warn{background:var(--color-background-warning);border-radius:var(--border-radius-md);padding:3px 7px;font-size:10px;color:var(--color-text-warning);margin-bottom:3px;display:flex;align-items:center;gap:3px}
+.info{background:var(--color-background-info);border-radius:var(--border-radius-md);padding:3px 7px;font-size:10px;color:var(--color-text-info);margin-bottom:3px;display:flex;align-items:center;gap:3px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;padding:7px 12px;background:var(--color-background-primary);border-top:0.5px solid var(--color-border-tertiary)}
+.li{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--color-text-secondary)}
+.ld{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.collapsed-row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.cc{border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-primary);padding:7px 10px;min-width:90px;cursor:pointer}
+.cc-name{font-size:11px;font-weight:500;color:var(--color-text-primary)}
+.cc-sub{font-size:9px;color:var(--color-text-secondary)}
+.cc-hc{font-size:9px;color:var(--color-text-tertiary);margin-top:2px;display:flex;align-items:center;gap:2px}
+</style>
+<div class="lf">
+  <p class="screen-label">Screen 2 — main view (collapsed by default)</p>
+  <div class="screen">
+    <div class="topbar">
+      <div class="t-title">
+        <i class="ti ti-sitemap" aria-hidden="true" style="font-size:13px"></i>
+        Org chart tool
+        <span class="t-meta">· as of May 28, 2025</span>
+      </div>
+      <div class="t-actions">
+        <button class="btn-s"><i class="ti ti-upload" aria-hidden="true" style="font-size:11px"></i> Upload new file</button>
+        <button class="btn-s"><i class="ti ti-download" aria-hidden="true" style="font-size:11px"></i> Export PNG</button>
+      </div>
+    </div>
+
+    <div class="filterbar">
+      <span style="font-size:10px;color:var(--color-text-tertiary)">Filter by</span>
+      <select class="fsel"><option>L4: all</option><option>Sarah Chen</option></select>
+      <select class="fsel"><option>L5: all</option><option>James Park</option><option>Maria Santos</option></select>
+      <select class="fsel"><option>Employment type: all</option><option>Regular</option><option>Contract</option></select>
+      <select class="fsel"><option>Grade: all</option><option>GG5</option><option>GG6</option></select>
+      <input class="fsearch" type="text" placeholder="Search name, title, grade…" />
+      <button class="btn-s" style="margin-left:auto;font-size:10px">✕ Clear</button>
+    </div>
+
+    <div class="split">
+      <div class="chart-area">
+        <div class="tree">
+          <div class="node" style="min-width:120px;text-align:center;border-color:var(--color-border-primary)">
+            <div class="n-name">Sarah Chen</div>
+            <div class="n-title">VP, Product Engineering</div>
+            <div class="n-meta">GG9 · Regular</div>
+            <span class="hc">42 people</span>
+          </div>
+          <div class="cv"></div>
+          <div style="font-size:9px;color:var(--color-text-tertiary);margin-bottom:8px;text-align:center">
+            <i class="ti ti-click" aria-hidden="true" style="font-size:10px"></i> Click any card to expand their sub-tree
+          </div>
+          <div class="collapsed-row">
+            <div class="cc" style="background:#AED6F1;border-color:#7ab8d9">
+              <div class="cc-name">James Park</div>
+              <div class="cc-sub">Sr. Director, Platform</div>
+              <div class="cc-hc"><i class="ti ti-users" aria-hidden="true" style="font-size:9px"></i> 14 people</div>
+            </div>
+            <div class="cc" style="background:#AED6F1;border-color:#7ab8d9;position:relative">
+              <div class="badge" style="background:#FADBD8;color:#922B21;border:0.5px solid #F1948A">Departing Jun 15</div>
+              <div class="cc-name">Maria Santos</div>
+              <div class="cc-sub">Director, Data</div>
+              <div class="cc-hc"><i class="ti ti-users" aria-hidden="true" style="font-size:9px"></i> 11 people</div>
+            </div>
+            <div class="cc" style="background:#D5D8DC;border-color:#adb0b5">
+              <div class="cc-name">Alex Kim</div>
+              <div class="cc-sub">Sr. Manager, Ops</div>
+              <div class="cc-hc"><i class="ti ti-users" aria-hidden="true" style="font-size:9px"></i> 8 people</div>
+            </div>
+            <div class="cc" style="background:#AED6F1;border-color:#7ab8d9">
+              <div class="cc-name">Nina Okonkwo</div>
+              <div class="cc-sub">Director, QA</div>
+              <div class="cc-hc"><i class="ti ti-users" aria-hidden="true" style="font-size:9px"></i> 6 people</div>
+            </div>
+            <div class="cc" style="background:#A9DFBF;border-color:#6dbe93">
+              <div class="cc-name">Dev Patel</div>
+              <div class="cc-sub">Manager, Infra</div>
+              <div class="cc-hc"><i class="ti ti-users" aria-hidden="true" style="font-size:9px"></i> 3 people</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary">
+        <div class="sec">
+          <div class="sec-h">Org snapshot</div>
+          <div style="font-size:12px;font-weight:500;color:var(--color-text-primary);margin-bottom:4px">Sarah Chen · 42 people</div>
+          <div class="stat"><span>Regular</span><span>28 · 67%</span></div>
+          <div class="stat"><span>Contract</span><span>8 · 19%</span></div>
+          <div class="stat"><span>Student/coop</span><span>4 · 9%</span></div>
+          <div class="stat"><span>Contingent</span><span>2 · 5%</span></div>
+          <div style="border-top:0.5px solid var(--color-border-tertiary);margin:5px 0"></div>
+          <div class="stat"><span>James Park</span><span>14</span></div>
+          <div class="stat"><span>Maria Santos</span><span>11</span></div>
+          <div class="stat"><span>Alex Kim</span><span>8</span></div>
+          <div class="stat"><span>Nina Okonkwo</span><span>6</span></div>
+          <div class="stat"><span>Dev Patel</span><span>3</span></div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h">What's changing</div>
+          <div class="stat"><span style="font-weight:500">Joining</span><span style="color:var(--color-text-success);font-weight:500">+3</span></div>
+          <div class="stat"><span style="font-weight:500">Leaving</span><span style="color:var(--color-text-danger);font-weight:500">−2</span></div>
+          <div class="stat" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:3px"><span style="font-weight:500">Net</span><span style="font-weight:500">+1</span></div>
+          <div style="font-size:10px;color:var(--color-text-tertiary);margin:5px 0 2px">≤ 30 days</div>
+          <div class="stat"><span>TBH · Sr. Engineer</span><span>Apr 1</span></div>
+          <div style="font-size:10px;color:var(--color-text-tertiary);margin:4px 0 2px">31–90 days</div>
+          <div class="stat"><span>M. Santos · Director</span><span>Jun 15</span></div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h">Open positions</div>
+          <div style="font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:4px">5 open reqs</div>
+          <div class="stat"><span>Platform</span><span>3</span></div>
+          <div class="stat"><span>Data</span><span>2</span></div>
+          <div style="margin-top:4px">
+            <div class="flag"><i class="ti ti-alert-triangle" aria-hidden="true" style="font-size:10px"></i> 3+ reqs · Platform</div>
+            <div class="flag"><i class="ti ti-alert-triangle" aria-hidden="true" style="font-size:10px"></i> Hiring mgr departing</div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h">Notes & flags</div>
+          <div class="info"><i class="ti ti-message" aria-hidden="true" style="font-size:10px"></i> 2 employees with comments</div>
+          <div class="warn"><i class="ti ti-alert-triangle" aria-hidden="true" style="font-size:10px"></i> Contractors 38% · Platform</div>
+          <div class="flag"><i class="ti ti-alert-triangle" aria-hidden="true" style="font-size:10px"></i> New hire mgr departing</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="li"><div class="ld" style="background:#AED6F1;border:0.5px solid #7ab8d9"></div>Regular</div>
+      <div class="li"><div class="ld" style="background:#A9DFBF;border:0.5px solid #6dbe93"></div>Contract</div>
+      <div class="li"><div class="ld" style="background:#F9E79F;border:0.5px solid #e6cc5a"></div>Student/coop</div>
+      <div class="li"><div class="ld" style="background:#D5D8DC;border:0.5px solid #adb0b5"></div>Contingent</div>
+      <div class="li"><div class="ld" style="background:#FAD7A0;border:0.5px solid #E59866"></div>On leave</div>
+      <div class="li"><div class="ld" style="background:var(--color-background-primary);border:1px dashed #aaa"></div>New hire</div>
+      <div class="li"><div class="ld" style="background:#FADBD8;border:0.5px solid #F1948A"></div>Departing</div>
+    </div>
+  </div>
+</div>

@@ -33,14 +33,14 @@ Visual Design
         1. On leave employees = light orange (#FAD7A0) 
         2. New hire: neutral white badge + start date
         3. Departing: red badge + departing date  
-4. Each node must display Name, Business Title, Global|Employee Type 
+4. Each node must display Name, Business Title, Global|Employee Type, Comments 
 5. The diagram must identify a newly hired employee along with hire date 
 6. The tree layout must follow a top-down hierarchy, with the manager at the top & their direct-report below 
 7. Filters based off Management Level 04 & Management Level 05, employment type and Global Grade 
 
 Org Chart Layout:
 1. On load, the org chart must render the VP node at the top with all L5 direct reports displayed as collapsed team cards beneath them in a single wrapped row
-2. Each collapsed team card must display: direct report name, business title, employment type color, headcount, and any active status badges (departing, on leave, new hire)
+2. Each collapsed team card must display: direct report name, business title, employment type color, headcount, comments, and any active status badges (departing, on leave, new hire)
 3. All L5 sub-trees must be collapsed by default — individual team members are hidden until the user expands a team
 4. A user must be able to expand and collapse any team card independently by clicking it — multiple teams may be expanded simultaneously
 5. When a team card is expanded, the sub-tree renders beneath that card in a top-down hierarchy following the same expand/collapse behaviour recursively for nested managers
