@@ -3085,12 +3085,19 @@ function drawConnectors() {
   const svg    = document.getElementById('connector-svg');
   if (!canvas || !svg) return;
 
-  // Size the SVG to match the full canvas dimensions
+  // Size the SVG to match the canvas's own (unzoomed) content dimensions.
+  // CSS zoom scales the canvas as seen by its parent, but scrollWidth/scrollHeight
+  // report the internal coordinate size — which is what the SVG path system uses.
   svg.setAttribute('width',  canvas.scrollWidth);
   svg.setAttribute('height', canvas.scrollHeight);
-  svg.innerHTML = ''; // clear previous lines
+  svg.innerHTML = '';
 
   const canvasRect = canvas.getBoundingClientRect();
+
+  // getBoundingClientRect() returns viewport coordinates, which are scaled by the
+  // CSS zoom applied to #chart-canvas. Dividing by zoom converts back to the
+  // canvas's own internal coordinate space, keeping paths aligned with nodes.
+  const zoom = STATE.zoom || 1;
 
   for (const emp of Object.values(STATE.employeeMap)) {
     if (emp.children.length === 0) continue;
@@ -3098,33 +3105,23 @@ function drawConnectors() {
     const childrenDiv = document.getElementById(`children-${emp.id}`);
     if (!childrenDiv || childrenDiv.classList.contains('hidden')) continue;
 
-    // Find the parent card's centre-bottom position
     const parentCard = canvas.querySelector(`.node-card[data-id="${emp.id}"]`);
     if (!parentCard) continue;
 
     const parentRect = parentCard.getBoundingClientRect();
-    // Subtract canvasRect to get canvas-relative coordinates
-    const parentX = parentRect.left - canvasRect.left + parentRect.width / 2;
-    const parentY = parentRect.bottom - canvasRect.top;
+    const parentX = (parentRect.left - canvasRect.left) / zoom + (parentRect.width / zoom) / 2;
+    const parentY = (parentRect.bottom - canvasRect.top) / zoom;
 
     for (const childId of emp.children) {
       const childCard = canvas.querySelector(`.node-card[data-id="${childId}"]`);
       if (!childCard) continue;
 
       const childRect = childCard.getBoundingClientRect();
-      const childX = childRect.left - canvasRect.left + childRect.width / 2;
-      const childY = childRect.top - canvasRect.top;
+      const childX = (childRect.left - canvasRect.left) / zoom + (childRect.width / zoom) / 2;
+      const childY = (childRect.top - canvasRect.top) / zoom;
 
-      // Midpoint Y — the horizontal crossbar of the elbow connector
       const midY = parentY + (childY - parentY) / 2;
 
-      /*
-       * Elbow path:
-       *   M parentX parentY        → start at centre-bottom of parent
-       *   L parentX midY           → go down to the crossbar
-       *   L childX  midY           → go across to above the child
-       *   L childX  childY         → go down to centre-top of child
-       */
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', `M ${parentX} ${parentY} L ${parentX} ${midY} L ${childX} ${midY} L ${childX} ${childY}`);
       path.setAttribute('stroke', '#C1C7D0');
